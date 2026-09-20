@@ -1,0 +1,30 @@
+{
+  "name": "nopal-ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Nopal AI Agent: Modular Autonomous AI Assistant powered by Supabase, Telegram, Gmail, and Google Gemini",
+  "scripts": {
+    "dev": "npx supabase start",
+    "functions:serve": "npx supabase functions serve --env-file supabase/functions/.env",
+    "db:reset": "npx supabase db reset",
+    "deploy": "npm run deploy:db && npm run deploy:secrets && npm run deploy:functions",
+    "deploy:db": "npx supabase db push",
+    "deploy:secrets": "npx supabase secrets set --env-file supabase/functions/.env --project-ref pobbqgnckilmqmrpiaod",
+    "deploy:functions": "npm run deploy:webhook && npm run deploy:gmail",
+    "deploy:webhook": "npx supabase functions deploy telegram-webhook --project-ref pobbqgnckilmqmrpiaod",
+    "deploy:gmail": "npx supabase functions deploy gmail-sync --project-ref pobbqgnckilmqmrpiaod",
+    "deploy:status": "npx supabase functions list --project-ref pobbqgnckilmqmrpiaod",
+    "migrate:crypto": "node --experimental-strip-types src/scripts/encrypt-legacy-tokens.ts",
+    "test": "node --test --experimental-strip-types tests/*.test.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^2.0.1",
+    "@supabase/supabase-js": "^2.49.1",
+    "hono": "^4.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "typescript": "^5.7.3"
+  }
+}

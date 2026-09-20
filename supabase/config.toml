@@ -1,0 +1,18 @@
+# Supabase local development configuration
+project_id = "nopal-agent"
+
+[api]
+enabled = true
+port = 54321
+
+[db]
+port = 54322
+
+[functions.telegram-webhook]
+verify_jwt = false
+
+[functions.gmail-sync]
+verify_jwt = false
+
+[functions.queue-worker]
+verify_jwt = false

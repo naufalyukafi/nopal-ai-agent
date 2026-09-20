@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "start": "deno run --allow-all supabase/functions/telegram-webhook/index.ts"
+  },
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@^2.49.1",
+    "@google/genai": "npm:@google/genai@^2.0.1",
+    "hono": "npm:hono@^4.7.2"
+  },
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window", "dom"]
+  }
+}

@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+*.env
+supabase/functions/.env
+
+# Supabase CLI Local & Temp Files
+supabase/.temp/
+
+# Log files
+logs/*
+!logs/.gitkeep
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Operating System & IDE
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build & Cache
+.deno/
+dist/
+build/
+out/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Database & Temporary Scratch Files
+*.db
+*.sqlite
+*.sqlite3
+scratch/
