@@ -10,6 +10,20 @@
 
 ---
 
+## 📌 What is Nopal AI Agent?
+
+**Nopal AI Agent** is an autonomous personal AI copilot designed to eliminate manual data entry for financial tracking and personal workflows. Operating seamlessly through a **Telegram Chat Interface** and an **Automated Gmail Sync Engine**, it functions as an intelligent digital ledger and proactive assistant.
+
+### 🎯 Real-World Capabilities & Use Cases:
+
+- 💬 **Natural Language Expense & Income Logging**: Chat naturally on Telegram (e.g., *"Beli kopi 25rb di Janji Jiwa"* or *"Received client payment $500"*). The AI extracts the category, amount, currency, and date into your database instantly.
+- 📬 **Automated Bank Email Receipt Scanning**: Automatically polls connected Gmail inboxes every 15 minutes for bank notifications and e-statements (BCA, Mandiri, Bank Jago, Jenius, GoPay, ShopeePay, AWS, GitHub, etc.), parses transaction data, and sends 1-tap confirmation cards to Telegram.
+- 📊 **Smart Budget Alerts & Instant Queries**: Ask questions in plain text (e.g., *"How much budget do I have left for dining out this month?"*) or set monthly limits (`/budget`). Receive proactive warning notifications when spending nears budget thresholds.
+- 🔘 **Human-in-the-Loop (HIL) Verification**: Interactive Telegram inline buttons (`[Confirm]`, `[Delete]`, `[Edit]`) ensure no automated email transactions are committed to your ledger without your explicit approval.
+- 🧩 **Modular Tool-Calling Engine**: Built with a decoupled architecture that easily expands beyond finance into task management, calendar scheduling, and custom productivity tools.
+
+---
+
 ## 🌟 Key Architectural Highlights
 
 - **FinOps 0-Token Fast-Routing System**: Hybrid routing architecture that processes transactional lookup commands (`/budget`, `/transactions`, `/sync`, `/email`, `/confirm_all`) in `< 200ms` with **0 LLM token cost** via direct database paths, executing AI LLM reasoning only when ambiguous natural language or un-structured email parsing is required.
