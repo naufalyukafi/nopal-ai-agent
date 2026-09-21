@@ -43,3 +43,17 @@ export interface ToolExecutionResult {
   message: string;
   data?: unknown;
 }
+
+export interface SmartDailyLimitStatus {
+  recommendedDailyLimit: number;
+  todaySpent: number;
+  todayRemainingLimit: number;
+  remainingDays: number;
+  totalMonthlyBudget: number;
+  remainingMonthlyBudget: number;
+  percentageSpentToday: number;
+  status: 'SAFE' | 'WARNING' | 'OVER_LIMIT';
+  progressBar: string;
+  salaryCycleEnd: string;
+}
+

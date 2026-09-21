@@ -1,5 +1,6 @@
 import { setCategoryBudget, getBudgetStatus } from '../db/budgets.db.ts';
 import { updateUserSalaryCutoffDay, getUserSalaryCutoffDay } from '../db/users.db.ts';
+import { getSmartDailyLimitStatus } from '../db/daily-limit.db.ts';
 
 export const budgetToolDeclarations = [
   {
@@ -35,6 +36,14 @@ export const budgetToolDeclarations = [
           description: 'Budget period format YYYY-MM (default: current month).',
         },
       },
+    },
+  },
+  {
+    name: 'get_smart_daily_limit',
+    description: 'Get smart dynamic daily limit status (safe-to-spend today, remaining daily limit, progress bar, and health status).',
+    parameters: {
+      type: 'OBJECT',
+      properties: {},
     },
   },
   {
@@ -78,6 +87,15 @@ export async function executeBudgetTool(toolName: string, args: Record<string, a
     };
   }
 
+  if (toolName === 'get_smart_daily_limit') {
+    const dailyStatus = await getSmartDailyLimitStatus(userId);
+    return {
+      success: true,
+      message: `Status limit harian berhasil diambil. Batas aman hari ini: Rp ${dailyStatus.recommendedDailyLimit.toLocaleString('id-ID')}, Terpakai: Rp ${dailyStatus.todaySpent.toLocaleString('id-ID')}, Sisa limit harian: Rp ${dailyStatus.todayRemainingLimit.toLocaleString('id-ID')}. Status: ${dailyStatus.status}.`,
+      data: dailyStatus,
+    };
+  }
+
   if (toolName === 'set_salary_date') {
     const day = Math.min(31, Math.max(1, Math.round(Number(args.cutoffDay))));
     await updateUserSalaryCutoffDay(userId, day);
@@ -90,3 +108,4 @@ export async function executeBudgetTool(toolName: string, args: Record<string, a
 
   throw new Error(`Unknown budget tool: ${toolName}`);
 }
+

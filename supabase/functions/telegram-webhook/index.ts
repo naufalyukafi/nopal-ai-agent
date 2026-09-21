@@ -13,9 +13,9 @@ const app = new Hono();
 
 const DEFAULT_REPLY_KEYBOARD = {
   keyboard: [
-    [{ text: 'Pengeluaran Hari Ini' }, { text: 'Status Budget' }],
-    [{ text: 'Riwayat Transaksi' }, { text: 'Sync Gmail' }],
-    [{ text: 'Hubungkan Email' }],
+    [{ text: 'Limit Harian 🎯' }, { text: 'Pengeluaran Hari Ini' }],
+    [{ text: 'Status Budget' }, { text: 'Riwayat Transaksi' }],
+    [{ text: 'Sync Gmail' }, { text: 'Hubungkan Email' }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -33,6 +33,7 @@ async function ensureBotCommandsRegistered() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         commands: [
+          { command: 'dailylimit', description: 'Batas ideal & sisa limit pengeluaran harian aman' },
           { command: 'today', description: 'Total & rincian pengeluaran hari ini' },
           { command: 'budget', description: 'Status limit anggaran bulan ini' },
           { command: 'transaksi', description: 'Riwayat 5 transaksi terakhir' },
@@ -203,20 +204,28 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
       const fastTask = async () => {
         try {
           const { getTodayTransactionsSummary } = await import('../../../src/db/transactions.db.ts');
+          const { getSmartDailyLimitStatus } = await import('../../../src/db/daily-limit.db.ts');
+
           const today = await getTodayTransactionsSummary(user.id);
+          const daily = await getSmartDailyLimitStatus(user.id);
           const dateStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 
           if (today.count === 0) {
-            await sendTelegramMessage(
-              chatId,
-              `📊 *Pengeluaran Hari Ini (${dateStr})*\n\nBelum ada pengeluaran yang dicatat untuk hari ini.`
-            );
+            let msg = `📊 *Pengeluaran Hari Ini (${dateStr})*\n\nBelum ada pengeluaran yang dicatat untuk hari ini.`;
+            if (daily.recommendedDailyLimit > 0) {
+              msg += `\n\n🎯 Batas ideal jajan hari ini: *Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}*`;
+            }
+            await sendTelegramMessage(chatId, msg);
             return;
           }
 
           let text = `📊 *Pengeluaran Hari Ini (${dateStr})*\n\n`;
-          text += `• Total Terpakai: *Rp ${today.totalSpent.toLocaleString('id-ID')}* (${today.count} transaksi)\n\n`;
-          text += `Rincian Transaksi:\n`;
+          text += `• Total Terpakai: *Rp ${today.totalSpent.toLocaleString('id-ID')}* (${today.count} transaksi)\n`;
+          if (daily.recommendedDailyLimit > 0) {
+            text += `• Batas Ideal Hari Ini: *Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}*\n`;
+            text += `• ${daily.progressBar}\n`;
+          }
+          text += `\nRincian Transaksi:\n`;
           today.transactions.forEach((tx, i) => {
             text += `${i + 1}. Rp ${tx.amount.toLocaleString('id-ID')} (${tx.categoryName})\n   ${tx.description} • ${tx.time}\n\n`;
           });
@@ -234,6 +243,50 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
         fastTask();
       }
       return c.json({ ok: true, status: 'fast_today_spending' });
+    }
+
+    // FAST ROUTE 2.8: Direct Smart Daily Limit (0-Token)
+    if (
+      lowerText === '/dailylimit' ||
+      lowerText === '/limit_harian' ||
+      lowerText === '/limitharian' ||
+      lowerText === 'limit harian' ||
+      lowerText === 'limit harian 🎯' ||
+      lowerText === 'jatah hari ini'
+    ) {
+      const fastTask = async () => {
+        try {
+          const { getSmartDailyLimitStatus } = await import('../../../src/db/daily-limit.db.ts');
+          const daily = await getSmartDailyLimitStatus(user.id);
+          const dateStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+
+          const statusIcon = daily.status === 'SAFE' ? '🟢 SAFE' : daily.status === 'WARNING' ? '🟡 WARNING' : '🔴 OVER LIMIT';
+
+          let text = `🎯 *Limit Harian Aman (${dateStr})*\n\n`;
+          text += `• Batas Ideal Hari Ini: *Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}*\n`;
+          text += `• Total Terpakai Hari Ini: *Rp ${daily.todaySpent.toLocaleString('id-ID')}*\n`;
+          if (daily.todayRemainingLimit >= 0) {
+            text += `• Sisa Limit Hari Ini: *Rp ${daily.todayRemainingLimit.toLocaleString('id-ID')}*\n`;
+          } else {
+            text += `• Melebihi Limit Hari Ini: *Rp ${Math.abs(daily.todayRemainingLimit).toLocaleString('id-ID')}*\n`;
+          }
+          text += `\nStatus: *${statusIcon}*\n`;
+          text += `${daily.progressBar}\n\n`;
+          text += `ℹ️ Sisa ${daily.remainingDays} hari dalam siklus gajian (s/d ${daily.salaryCycleEnd}). Sisa budget bulanan: Rp ${daily.remainingMonthlyBudget.toLocaleString('id-ID')}.`;
+
+          await sendTelegramMessage(chatId, text);
+        } catch (err) {
+          logger.error('TelegramWebhook', 'Error fetching smart daily limit fast route', err);
+          await sendTelegramMessage(chatId, 'Gagal mengambil limit harian.');
+        }
+      };
+      if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(fastTask());
+      } else {
+        fastTask();
+      }
+      return c.json({ ok: true, status: 'fast_daily_limit' });
     }
 
     // FAST ROUTE 3: Direct Recent Transactions from DB without Gemini LLM
