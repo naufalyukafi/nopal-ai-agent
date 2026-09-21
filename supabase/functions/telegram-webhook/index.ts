@@ -13,7 +13,7 @@ const app = new Hono();
 
 const DEFAULT_REPLY_KEYBOARD = {
   keyboard: [
-    [{ text: 'Limit Harian 🎯' }, { text: 'Pengeluaran Hari Ini' }],
+    [{ text: 'Limit Harian' }, { text: 'Pengeluaran Hari Ini' }],
     [{ text: 'Status Budget' }, { text: 'Riwayat Transaksi' }],
     [{ text: 'Sync Gmail' }, { text: 'Hubungkan Email' }],
   ],
@@ -205,29 +205,30 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
         try {
           const { getTodayTransactionsSummary } = await import('../../../src/db/transactions.db.ts');
           const { getSmartDailyLimitStatus } = await import('../../../src/db/daily-limit.db.ts');
+          const { sanitizeDescription } = await import('../../../src/utils/sanitize.ts');
 
           const today = await getTodayTransactionsSummary(user.id);
           const daily = await getSmartDailyLimitStatus(user.id);
           const dateStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 
           if (today.count === 0) {
-            let msg = `📊 *Pengeluaran Hari Ini (${dateStr})*\n\nBelum ada pengeluaran yang dicatat untuk hari ini.`;
+            let msg = `Pengeluaran Hari Ini (${dateStr})\n\nBelum ada pengeluaran yang dicatat untuk hari ini.`;
             if (daily.recommendedDailyLimit > 0) {
-              msg += `\n\n🎯 Batas ideal jajan hari ini: *Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}*`;
+              msg += `\n\nBatas Ideal Hari Ini: Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}`;
             }
             await sendTelegramMessage(chatId, msg);
             return;
           }
 
-          let text = `📊 *Pengeluaran Hari Ini (${dateStr})*\n\n`;
-          text += `• Total Terpakai: *Rp ${today.totalSpent.toLocaleString('id-ID')}* (${today.count} transaksi)\n`;
+          let text = `Pengeluaran Hari Ini (${dateStr})\n\n`;
+          text += `• Total Terpakai: Rp ${today.totalSpent.toLocaleString('id-ID')} (${today.count} transaksi)\n`;
           if (daily.recommendedDailyLimit > 0) {
-            text += `• Batas Ideal Hari Ini: *Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}*\n`;
-            text += `• ${daily.progressBar}\n`;
+            text += `• Limit Harian (Standar): Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')} / hari\n`;
           }
           text += `\nRincian Transaksi:\n`;
           today.transactions.forEach((tx, i) => {
-            text += `${i + 1}. Rp ${tx.amount.toLocaleString('id-ID')} (${tx.categoryName})\n   ${tx.description} • ${tx.time}\n\n`;
+            const cleanDesc = sanitizeDescription(tx.description);
+            text += `${i + 1}. Rp ${tx.amount.toLocaleString('id-ID')} — ${tx.categoryName}\n   ${cleanDesc} • ${tx.time}\n\n`;
           });
 
           await sendTelegramMessage(chatId, text);
@@ -251,7 +252,6 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
       lowerText === '/limit_harian' ||
       lowerText === '/limitharian' ||
       lowerText === 'limit harian' ||
-      lowerText === 'limit harian 🎯' ||
       lowerText === 'jatah hari ini'
     ) {
       const fastTask = async () => {
@@ -260,19 +260,19 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
           const daily = await getSmartDailyLimitStatus(user.id);
           const dateStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 
-          const statusIcon = daily.status === 'SAFE' ? '🟢 SAFE' : daily.status === 'WARNING' ? '🟡 WARNING' : '🔴 OVER LIMIT';
+          const statusText = daily.status === 'SAFE' ? 'Aman' : daily.status === 'WARNING' ? 'Waspada' : 'Melebihi Limit';
 
-          let text = `🎯 *Limit Harian Aman (${dateStr})*\n\n`;
-          text += `• Batas Ideal Hari Ini: *Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}*\n`;
-          text += `• Total Terpakai Hari Ini: *Rp ${daily.todaySpent.toLocaleString('id-ID')}*\n`;
+          let text = `Limit Harian Aman (${dateStr})\n\n`;
+          text += `• Batas Ideal Hari Ini: Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}\n`;
+          text += `• Total Terpakai Hari Ini: Rp ${daily.todaySpent.toLocaleString('id-ID')}\n`;
           if (daily.todayRemainingLimit >= 0) {
-            text += `• Sisa Limit Hari Ini: *Rp ${daily.todayRemainingLimit.toLocaleString('id-ID')}*\n`;
+            text += `• Sisa Limit Hari Ini: Rp ${daily.todayRemainingLimit.toLocaleString('id-ID')}\n`;
           } else {
-            text += `• Melebihi Limit Hari Ini: *Rp ${Math.abs(daily.todayRemainingLimit).toLocaleString('id-ID')}*\n`;
+            text += `• Melebihi Limit Hari Ini: Rp ${Math.abs(daily.todayRemainingLimit).toLocaleString('id-ID')}\n`;
           }
-          text += `\nStatus: *${statusIcon}*\n`;
-          text += `${daily.progressBar}\n\n`;
-          text += `ℹ️ Sisa ${daily.remainingDays} hari dalam siklus gajian (s/d ${daily.salaryCycleEnd}). Sisa budget bulanan: Rp ${daily.remainingMonthlyBudget.toLocaleString('id-ID')}.`;
+          text += `\nStatus: ${statusText} (${daily.percentageSpentToday}% terpakai)\n`;
+          text += `Sisa Siklus: ${daily.remainingDays} hari (s/d ${daily.salaryCycleEnd})\n`;
+          text += `Sisa Budget Bulan Ini: Rp ${daily.remainingMonthlyBudget.toLocaleString('id-ID')}`;
 
           await sendTelegramMessage(chatId, text);
         } catch (err) {
@@ -294,6 +294,8 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
       const fastTask = async () => {
         try {
           const { getRecentTransactions, getPendingTransactions } = await import('../../../src/db/transactions.db.ts');
+          const { sanitizeDescription } = await import('../../../src/utils/sanitize.ts');
+
           const txs = await getRecentTransactions(user.id, 5);
           const pendingTxs = await getPendingTransactions(user.id);
 
@@ -308,15 +310,17 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
               const dateStr = new Date(tx.transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
               // @ts-ignore
               const catName = tx.categories?.name || 'Lain-lain';
+              const cleanDesc = sanitizeDescription(tx.description);
               const srcLabel = tx.source === 'gmail' ? ' [Gmail]' : '';
-              text += `${i + 1}. Rp ${Number(tx.amount).toLocaleString('id-ID')} (${catName})${srcLabel}\n   ${tx.description || 'Tanpa keterangan'} • ${dateStr}\n\n`;
+              text += `${i + 1}. Rp ${Number(tx.amount).toLocaleString('id-ID')} — ${catName}${srcLabel}\n   ${cleanDesc} • ${dateStr}\n\n`;
             });
           }
 
           if (pendingTxs.length > 0) {
             text += `Menunggu Konfirmasi Email (${pendingTxs.length} transaksi):\n`;
             pendingTxs.forEach((pTx: any) => {
-              text += `• Rp ${Number(pTx.amount).toLocaleString('id-ID')} - ${pTx.description || 'Transaksi Email'}\n`;
+              const cleanDesc = sanitizeDescription(pTx.description);
+              text += `• Rp ${Number(pTx.amount).toLocaleString('id-ID')} - ${cleanDesc}\n`;
             });
           }
 

@@ -71,7 +71,8 @@ export async function getSmartDailyLimitStatus(
   const todaySummary = await getTodayTransactionsSummary(userId);
   const todaySpent = todaySummary.totalSpent;
 
-  // 5. Calculate remaining days in cycle
+  // 5. Calculate remaining days & total days in cycle
+  const cycleStart = new Date(cycle.startDate);
   const cycleEnd = new Date(cycle.endDate);
   const todayStart = new Date(
     Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), referenceDate.getUTCDate(), 0, 0, 0)
@@ -80,20 +81,28 @@ export async function getSmartDailyLimitStatus(
     Date.UTC(cycleEnd.getUTCFullYear(), cycleEnd.getUTCMonth(), cycleEnd.getUTCDate(), 23, 59, 59, 999)
   );
 
+  const totalCycleMs = cycleEndDay.getTime() - cycleStart.getTime();
+  const totalDaysInCycle = Math.max(1, Math.ceil(totalCycleMs / (1000 * 60 * 60 * 24)));
+
   const diffMs = cycleEndDay.getTime() - todayStart.getTime();
   const remainingDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
-  // 6. Calculate daily limits
+  // 6. Calculate realistic daily limit (Baseline vs Dynamic Pace)
   const remainingMonthlyBudget = Math.max(0, totalMonthlyBudget - cycleSpent);
-  // Budget available for today + future remaining days in cycle
   const availableBudgetForRemainder = Math.max(0, totalMonthlyBudget - (cycleSpent - todaySpent));
-  const recommendedDailyLimit = totalMonthlyBudget > 0
-    ? Math.floor(availableBudgetForRemainder / remainingDays)
-    : 0;
+
+  const baselineDailyLimit = totalMonthlyBudget > 0 ? Math.floor(totalMonthlyBudget / totalDaysInCycle) : 0;
+  const dynamicDailyLimit = totalMonthlyBudget > 0 ? Math.floor(availableBudgetForRemainder / remainingDays) : 0;
+
+  // Realism normalization: if dynamic limit is artificially inflated because of few remaining days, cap at baseline
+  let recommendedDailyLimit = dynamicDailyLimit;
+  if (baselineDailyLimit > 0 && dynamicDailyLimit > baselineDailyLimit * 1.25) {
+    recommendedDailyLimit = baselineDailyLimit;
+  }
 
   const todayRemainingLimit = recommendedDailyLimit - todaySpent;
 
-  // 7. Calculate status & progress bar
+  // 7. Calculate status & clean progress indicator
   let percentageSpentToday = 0;
   if (recommendedDailyLimit > 0) {
     percentageSpentToday = Math.min(100, Math.round((todaySpent / recommendedDailyLimit) * 100));
@@ -101,9 +110,7 @@ export async function getSmartDailyLimitStatus(
     percentageSpentToday = 100;
   }
 
-  const filledBlocks = Math.min(10, Math.round((percentageSpentToday / 100) * 10));
-  const emptyBlocks = 10 - filledBlocks;
-  const progressBar = `[${'█'.repeat(filledBlocks)}${'░'.repeat(emptyBlocks)}] ${percentageSpentToday}%`;
+  const progressBar = `${percentageSpentToday}% terpakai`;
 
   let status: 'SAFE' | 'WARNING' | 'OVER_LIMIT' = 'SAFE';
   if (recommendedDailyLimit > 0) {
