@@ -1,9 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSmartDailyLimitStatus } from '../src/db/daily-limit.db.ts';
+import { getSmartDailyLimitStatus, isSavingsCategory } from '../src/db/daily-limit.db.ts';
 
 test('getSmartDailyLimitStatus module function signature exists', () => {
   assert.equal(typeof getSmartDailyLimitStatus, 'function', 'getSmartDailyLimitStatus should be an exported function');
+});
+
+test('isSavingsCategory correctly identifies savings and investment categories', () => {
+  assert.equal(isSavingsCategory('Tabungan'), true);
+  assert.equal(isSavingsCategory('Tabungan & Investasi'), true);
+  assert.equal(isSavingsCategory('Savings Account'), true);
+  assert.equal(isSavingsCategory('Deposito BCA'), true);
+  assert.equal(isSavingsCategory('Makanan & Minuman'), false);
+  assert.equal(isSavingsCategory('Kost'), false);
+  assert.equal(isSavingsCategory('Tagihan & Utilitas'), false);
 });
 
 test('Smart Daily Limit mathematical calculations logic', () => {
@@ -21,3 +31,4 @@ test('Smart Daily Limit mathematical calculations logic', () => {
   assert.equal(recommendedDailyLimit, 185000, 'Recommended daily limit should be 185,000 IDR');
   assert.equal(todayRemainingLimit, 135000, 'Remaining daily limit today should be 135,000 IDR');
 });
+

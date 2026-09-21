@@ -5,6 +5,11 @@ import { getTodayTransactionsSummary } from './transactions.db.ts';
 import type { SmartDailyLimitStatus } from '../types/index.ts';
 import { logger } from '../utils/logger.ts';
 
+export function isSavingsCategory(catName?: string): boolean {
+  if (!catName) return false;
+  return /tabungan|investasi|savings|deposito|dana darurat|reksa dana|portfolio/i.test(catName.trim());
+}
+
 export async function getSmartDailyLimitStatus(
   userId: string,
   referenceDate: Date = new Date()
@@ -15,11 +20,11 @@ export async function getSmartDailyLimitStatus(
   const cutoffDay = await getUserSalaryCutoffDay(userId);
   const cycle = calculateSalaryCycleDateRange(cutoffDay, referenceDate);
 
-  // 2. Fetch total active monthly budget for user
+  // 2. Fetch total active monthly budget for user (excluding Savings / Tabungan categories)
   const targetPeriod = referenceDate.toISOString().slice(0, 7);
   const { data: budgets, error: budgetError } = await supabase
     .from('budgets')
-    .select('limit_amount, category_id')
+    .select('limit_amount, category_id, categories(name)')
     .eq('user_id', userId)
     .eq('period', targetPeriod);
 
@@ -32,7 +37,7 @@ export async function getSmartDailyLimitStatus(
     // Fallback to latest configured budget per category
     const { data: latestBudgets } = await supabase
       .from('budgets')
-      .select('limit_amount, category_id')
+      .select('limit_amount, category_id, categories(name)')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -44,7 +49,12 @@ export async function getSmartDailyLimitStatus(
     });
   }
 
-  const totalMonthlyBudget = activeBudgets.reduce(
+  // Filter out Savings categories so daily limit only reflects operational living expenses
+  const operationalBudgets = activeBudgets.filter(
+    (b: any) => !isSavingsCategory(b.categories?.name)
+  );
+
+  const totalMonthlyBudget = operationalBudgets.reduce(
     (sum: number, b: any) => sum + Number(b.limit_amount || 0),
     0
   );
@@ -52,7 +62,7 @@ export async function getSmartDailyLimitStatus(
   // 3. Fetch total confirmed transactions in current salary cycle
   const { data: cycleTxs, error: txError } = await supabase
     .from('transactions')
-    .select('amount')
+    .select('amount, categories(name)')
     .eq('user_id', userId)
     .eq('status', 'confirmed')
     .gte('transaction_date', cycle.startDate)
@@ -62,10 +72,11 @@ export async function getSmartDailyLimitStatus(
     logger.error('DB:DailyLimit', 'Error fetching cycle transactions for daily limit', txError, { userId, cycle });
   }
 
-  const cycleSpent = (cycleTxs || []).reduce(
-    (sum: number, t: any) => sum + Number(t.amount || 0),
-    0
-  );
+  // Filter out confirmed transactions under Savings categories from spent total
+  const cycleSpent = (cycleTxs || []).reduce((sum: number, t: any) => {
+    if (isSavingsCategory(t.categories?.name)) return sum;
+    return sum + Number(t.amount || 0);
+  }, 0);
 
   // 4. Fetch today's confirmed spending summary
   const todaySummary = await getTodayTransactionsSummary(userId);
