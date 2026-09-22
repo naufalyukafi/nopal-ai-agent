@@ -3,6 +3,7 @@ import type { Transaction } from '../types/index.ts';
 import { logger } from '../utils/logger.ts';
 import { logAuditEvent } from './audit.db.ts';
 import { getOrCreateCategoryByName } from './budgets.db.ts';
+import { getWIBTodayRange, getWIBMonthRange, getWIBMonthPeriod } from '../utils/date.ts';
 
 export async function createManualTransaction(params: {
   userId: string;
@@ -179,10 +180,9 @@ export async function getMonthlyCategorySummary(
   periodStr?: string // e.g. '2026-09'
 ): Promise<{ categoryName: string; totalAmount: number }[]> {
   const supabase = getSupabaseClient();
-  const targetPeriod = periodStr || new Date().toISOString().slice(0, 7);
+  const targetPeriod = periodStr || getWIBMonthPeriod();
   const [year, month] = targetPeriod.split('-').map(Number);
-  const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0)).toISOString();
-  const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)).toISOString();
+  const { startDate, endDate } = getWIBMonthRange(year, month);
 
   const { data, error } = await supabase
     .from('transactions')
@@ -235,12 +235,13 @@ export async function updateTransactionCategory(params: {
 
   let candidateTxs = txs;
 
-  // Filter 1: If amount specified, filter by amount
+  // Filter 1: If amount specified, filter by amount. If no match, throw error instead of silent corruption
   if (targetAmount && targetAmount > 0) {
     const amountMatches = candidateTxs.filter((t: any) => Number(t.amount) === targetAmount);
-    if (amountMatches.length > 0) {
-      candidateTxs = amountMatches;
+    if (amountMatches.length === 0) {
+      throw new Error(`Tidak ditemukan transaksi dengan nominal Rp ${targetAmount.toLocaleString('id-ID')}.`);
     }
+    candidateTxs = amountMatches;
   }
 
   // Filter 2: If query specified, check description OR current category name
@@ -250,9 +251,14 @@ export async function updateTransactionCategory(params: {
       const catMatch = (t.categories?.name || '').toLowerCase().includes(queryLower);
       return descMatch || catMatch;
     });
-    if (queryMatches.length > 0) {
-      candidateTxs = queryMatches;
+    if (queryMatches.length === 0) {
+      throw new Error(`Tidak ditemukan transaksi yang cocok dengan kata kunci "${params.transactionQuery}".`);
     }
+    candidateTxs = queryMatches;
+  }
+
+  if (candidateTxs.length === 0) {
+    throw new Error('Tidak ditemukan transaksi yang cocok dengan kriteria untuk diubah kategorinya.');
   }
 
   const targetTx = candidateTxs[0];
@@ -273,16 +279,16 @@ export async function updateTransactionCategory(params: {
   return updatedTx as Transaction;
 }
 
-export async function getTodayTransactionsSummary(userId: string): Promise<{
+export async function getTodayTransactionsSummary(
+  userId: string,
+  referenceDate: Date = new Date()
+): Promise<{
   totalSpent: number;
   count: number;
   transactions: Array<{ id: string; amount: number; description: string; categoryName: string; time: string }>;
 }> {
   const supabase = getSupabaseClient();
-  const now = new Date();
-
-  const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)).toISOString();
-  const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999)).toISOString();
+  const { startDate, endDate } = getWIBTodayRange(referenceDate);
 
   const { data: txs, error } = await supabase
     .from('transactions')
@@ -302,7 +308,11 @@ export async function getTodayTransactionsSummary(userId: string): Promise<{
   const list = (txs || []).map((t: any) => {
     const amtCents = Math.round((Number(t.amount) || 0) * 100);
     totalCents += amtCents;
-    const time = new Date(t.transaction_date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const time = new Date(t.transaction_date).toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Jakarta',
+    });
     return {
       id: t.id,
       amount: Number(t.amount),

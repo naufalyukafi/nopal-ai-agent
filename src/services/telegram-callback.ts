@@ -99,7 +99,9 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
           const { checkAndSendBudgetAlerts } = await import('./budget-alert.ts');
 
           const statuses = await getBudgetStatus(tx.user_id);
-          const matchedStatus = statuses.find((s) => s.spentAmount > 0);
+          const matchedStatus = statuses.find(
+            (s) => tx.category_id && s.categoryId === tx.category_id
+          ) || statuses.find((s) => s.spentAmount > 0);
 
           let msg = `Transaksi Rp ${Number(tx.amount).toLocaleString('id-ID')} telah berhasil dicatat ke anggaran.\n\n`;
           if (matchedStatus) {

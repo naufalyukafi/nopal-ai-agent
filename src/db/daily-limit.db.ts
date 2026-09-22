@@ -4,6 +4,7 @@ import { calculateSalaryCycleDateRange } from './budgets.db.ts';
 import { getTodayTransactionsSummary } from './transactions.db.ts';
 import type { SmartDailyLimitStatus } from '../types/index.ts';
 import { logger } from '../utils/logger.ts';
+import { getWIBStartOfDay } from '../utils/date.ts';
 
 export function isSavingsCategory(catName?: string): boolean {
   if (!catName) return false;
@@ -21,7 +22,8 @@ export async function getSmartDailyLimitStatus(
   const cycle = calculateSalaryCycleDateRange(cutoffDay, referenceDate);
 
   // 2. Fetch total active monthly budget for user (excluding Savings / Tabungan categories)
-  const targetPeriod = referenceDate.toISOString().slice(0, 7);
+  // Consistently uses canonical cycleMonthPeriod so the cycle's budget doesn't flip halfway through
+  const targetPeriod = cycle.cycleMonthPeriod;
   const { data: budgets, error: budgetError } = await supabase
     .from('budgets')
     .select('limit_amount, category_id, categories(name)')
@@ -54,10 +56,11 @@ export async function getSmartDailyLimitStatus(
     (b: any) => !isSavingsCategory(b.categories?.name)
   );
 
-  const totalMonthlyBudget = operationalBudgets.reduce(
-    (sum: number, b: any) => sum + Number(b.limit_amount || 0),
+  const totalMonthlyBudgetCents = operationalBudgets.reduce(
+    (sum: number, b: any) => sum + Math.round(Number(b.limit_amount || 0) * 100),
     0
   );
+  const totalMonthlyBudget = Math.round(totalMonthlyBudgetCents) / 100;
 
   // 3. Fetch total confirmed transactions in current salary cycle
   const { data: cycleTxs, error: txError } = await supabase
@@ -72,30 +75,26 @@ export async function getSmartDailyLimitStatus(
     logger.error('DB:DailyLimit', 'Error fetching cycle transactions for daily limit', txError, { userId, cycle });
   }
 
-  // Filter out confirmed transactions under Savings categories from spent total
-  const cycleSpent = (cycleTxs || []).reduce((sum: number, t: any) => {
+  // Filter out confirmed transactions under Savings categories using cent math
+  const cycleSpentCents = (cycleTxs || []).reduce((sum: number, t: any) => {
     if (isSavingsCategory(t.categories?.name)) return sum;
-    return sum + Number(t.amount || 0);
+    return sum + Math.round(Number(t.amount || 0) * 100);
   }, 0);
+  const cycleSpent = Math.round(cycleSpentCents) / 100;
 
-  // 4. Fetch today's confirmed spending summary
-  const todaySummary = await getTodayTransactionsSummary(userId);
+  // 4. Fetch today's confirmed spending summary using WIB boundaries
+  const todaySummary = await getTodayTransactionsSummary(userId, referenceDate);
   const todaySpent = todaySummary.totalSpent;
 
-  // 5. Calculate remaining days & total days in cycle
+  // 5. Calculate remaining days & total days in cycle accurately in WIB
   const cycleStart = new Date(cycle.startDate);
   const cycleEnd = new Date(cycle.endDate);
-  const todayStart = new Date(
-    Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), referenceDate.getUTCDate(), 0, 0, 0)
-  );
-  const cycleEndDay = new Date(
-    Date.UTC(cycleEnd.getUTCFullYear(), cycleEnd.getUTCMonth(), cycleEnd.getUTCDate(), 23, 59, 59, 999)
-  );
+  const todayStart = getWIBStartOfDay(referenceDate);
 
-  const totalCycleMs = cycleEndDay.getTime() - cycleStart.getTime();
-  const totalDaysInCycle = Math.max(1, Math.ceil(totalCycleMs / (1000 * 60 * 60 * 24)));
+  const totalCycleMs = cycleEnd.getTime() - cycleStart.getTime();
+  const totalDaysInCycle = Math.max(1, Math.round(totalCycleMs / (1000 * 60 * 60 * 24)));
 
-  const diffMs = cycleEndDay.getTime() - todayStart.getTime();
+  const diffMs = cycleEnd.getTime() - todayStart.getTime();
   const remainingDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
   // 6. Calculate realistic daily limit (Baseline vs Dynamic Pace)
@@ -105,12 +104,8 @@ export async function getSmartDailyLimitStatus(
   const baselineDailyLimit = totalMonthlyBudget > 0 ? Math.floor(totalMonthlyBudget / totalDaysInCycle) : 0;
   const dynamicDailyLimit = totalMonthlyBudget > 0 ? Math.floor(availableBudgetForRemainder / remainingDays) : 0;
 
-  // Realism normalization: if dynamic limit is artificially inflated because of few remaining days, cap at baseline
-  let recommendedDailyLimit = dynamicDailyLimit;
-  if (baselineDailyLimit > 0 && dynamicDailyLimit > baselineDailyLimit * 1.25) {
-    recommendedDailyLimit = baselineDailyLimit;
-  }
-
+  // Honest dynamic limit calculation: rewards early savings and reflects actual remaining runway
+  const recommendedDailyLimit = dynamicDailyLimit;
   const todayRemainingLimit = recommendedDailyLimit - todaySpent;
 
   // 7. Calculate status & clean progress indicator
@@ -139,6 +134,7 @@ export async function getSmartDailyLimitStatus(
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: 'Asia/Jakarta',
   });
 
   return {

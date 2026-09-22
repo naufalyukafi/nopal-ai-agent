@@ -206,7 +206,8 @@ STRICT GUARDRAILS & PROMPT INJECTION PROTECTION:
         break;
       }
 
-      // Execute each function call in order
+      // Execute each function call in order and collect functionResponse parts into a single turn
+      const functionResponseParts: any[] = [];
       for (const toolCall of functionCalls) {
         if (!toolCall || !toolCall.name) continue;
 
@@ -220,16 +221,18 @@ STRICT GUARDRAILS & PROMPT INJECTION PROTECTION:
 
         logger.info('Agent', `Tool execution completed`, { toolName: toolCall.name, success: toolResult.success });
 
+        functionResponseParts.push({
+          functionResponse: {
+            name: toolCall.name,
+            response: { result: toolResult },
+          },
+        });
+      }
+
+      if (functionResponseParts.length > 0) {
         contents.push({
           role: 'user',
-          parts: [
-            {
-              functionResponse: {
-                name: toolCall.name,
-                response: { result: toolResult },
-              },
-            },
-          ],
+          parts: functionResponseParts,
         });
       }
     }

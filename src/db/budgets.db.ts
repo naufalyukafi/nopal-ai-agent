@@ -2,32 +2,77 @@ import { getSupabaseClient } from './supabase.ts';
 import { getUserSalaryCutoffDay } from './users.db.ts';
 import type { Budget } from '../types/index.ts';
 import { logger } from '../utils/logger.ts';
+import { getWIBDate, getDaysInMonth, getWIBMonthPeriod, getWIBMonthRange } from '../utils/date.ts';
+
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+export interface BudgetCategoryStatus {
+  categoryId: string;
+  categoryName: string;
+  limitAmount: number;
+  spentAmount: number;
+  remainingAmount: number;
+  percentageSpent: number;
+}
 
 export function calculateSalaryCycleDateRange(
   cutoffDay: number,
   referenceDate: Date = new Date()
-): { startDate: string; endDate: string } {
-  const year = referenceDate.getUTCFullYear();
-  const month = referenceDate.getUTCMonth(); // 0-indexed
-  const day = referenceDate.getUTCDate();
+): { startDate: string; endDate: string; cycleMonthPeriod: string } {
+  const wib = getWIBDate(referenceDate);
+  const year = wib.year;
+  const month = wib.month; // 1-12
+  const day = wib.day;
 
   if (cutoffDay <= 1) {
-    // Default calendar month 1st to last day of month
-    const start = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-    const end = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
-    return { startDate: start.toISOString(), endDate: end.toISOString() };
+    // Default calendar month 1st to last day of month in WIB
+    const monthRange = getWIBMonthRange(year, month);
+    const cycleMonthPeriod = `${year}-${String(month).padStart(2, '0')}`;
+    return {
+      startDate: monthRange.startDate,
+      endDate: monthRange.endDate,
+      cycleMonthPeriod,
+    };
   }
 
   if (day >= cutoffDay) {
     // Current cycle: cutoffDay of current month -> (cutoffDay - 1) of next month
-    const start = new Date(Date.UTC(year, month, cutoffDay, 0, 0, 0, 0));
-    const end = new Date(Date.UTC(year, month + 1, cutoffDay - 1, 23, 59, 59, 999));
-    return { startDate: start.toISOString(), endDate: end.toISOString() };
+    const daysInCurrMonth = getDaysInMonth(year, month);
+    const actualStartDay = Math.min(cutoffDay, daysInCurrMonth);
+
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const daysInNextMonth = getDaysInMonth(nextYear, nextMonth);
+    const actualEndDay = Math.min(cutoffDay - 1, daysInNextMonth);
+
+    const startUtc = Date.UTC(year, month - 1, actualStartDay, 0, 0, 0, 0) - WIB_OFFSET_MS;
+    const endUtc = Date.UTC(nextYear, nextMonth - 1, actualEndDay, 23, 59, 59, 999) - WIB_OFFSET_MS;
+    const cycleMonthPeriod = `${year}-${String(month).padStart(2, '0')}`;
+
+    return {
+      startDate: new Date(startUtc).toISOString(),
+      endDate: new Date(endUtc).toISOString(),
+      cycleMonthPeriod,
+    };
   } else {
     // Current cycle: cutoffDay of previous month -> (cutoffDay - 1) of current month
-    const start = new Date(Date.UTC(year, month - 1, cutoffDay, 0, 0, 0, 0));
-    const end = new Date(Date.UTC(year, month, cutoffDay - 1, 23, 59, 59, 999));
-    return { startDate: start.toISOString(), endDate: end.toISOString() };
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    const daysInPrevMonth = getDaysInMonth(prevYear, prevMonth);
+    const actualStartDay = Math.min(cutoffDay, daysInPrevMonth);
+
+    const daysInCurrMonth = getDaysInMonth(year, month);
+    const actualEndDay = Math.min(cutoffDay - 1, daysInCurrMonth);
+
+    const startUtc = Date.UTC(prevYear, prevMonth - 1, actualStartDay, 0, 0, 0, 0) - WIB_OFFSET_MS;
+    const endUtc = Date.UTC(year, month - 1, actualEndDay, 23, 59, 59, 999) - WIB_OFFSET_MS;
+    const cycleMonthPeriod = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+
+    return {
+      startDate: new Date(startUtc).toISOString(),
+      endDate: new Date(endUtc).toISOString(),
+      cycleMonthPeriod,
+    };
   }
 }
 
@@ -35,10 +80,11 @@ export async function getOrCreateCategoryByName(userId: string, categoryName: st
   const supabase = getSupabaseClient();
   const trimmed = categoryName.trim();
 
-  // 1. Exact match check
+  // 1. Exact match check (scoped by user_id to prevent multi-tenant leaks)
   const { data: exactCat } = await supabase
     .from('categories')
     .select('id')
+    .eq('user_id', userId)
     .ilike('name', trimmed)
     .limit(1)
     .maybeSingle();
@@ -47,10 +93,11 @@ export async function getOrCreateCategoryByName(userId: string, categoryName: st
     return exactCat.id;
   }
 
-  // 2. Partial match check
+  // 2. Partial match check (scoped by user_id)
   const { data: partialCat } = await supabase
     .from('categories')
     .select('id')
+    .eq('user_id', userId)
     .ilike('name', `%${trimmed}%`)
     .limit(1)
     .maybeSingle();
@@ -59,7 +106,7 @@ export async function getOrCreateCategoryByName(userId: string, categoryName: st
     return partialCat.id;
   }
 
-  // 3. Insert new category
+  // 3. Insert new category for this user
   const { data: newCat, error: catError } = await supabase
     .from('categories')
     .insert({
@@ -84,9 +131,9 @@ export async function setCategoryBudget(params: {
   period?: string;
 }): Promise<Budget> {
   const supabase = getSupabaseClient();
-  const targetPeriod = params.period || new Date().toISOString().slice(0, 7);
+  const targetPeriod = params.period || getWIBMonthPeriod();
 
-  // 1. Find or create category
+  // 1. Find or create category scoped to this user
   const categoryId = await getOrCreateCategoryByName(params.userId, params.categoryName);
 
   // 2. Upsert budget
@@ -116,22 +163,25 @@ export async function setCategoryBudget(params: {
 export async function getBudgetStatus(
   userId: string,
   periodStr?: string
-): Promise<{ categoryName: string; limitAmount: number; spentAmount: number; remainingAmount: number; percentageSpent: number }[]> {
+): Promise<BudgetCategoryStatus[]> {
   const supabase = getSupabaseClient();
-  const targetPeriod = periodStr || new Date().toISOString().slice(0, 7);
 
   const cutoffDay = await getUserSalaryCutoffDay(userId);
   let startDate: string;
   let endDate: string;
+  let canonicalPeriod: string;
 
   if (periodStr) {
-    const [year, month] = targetPeriod.split('-').map(Number);
-    startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0)).toISOString();
-    endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)).toISOString();
+    canonicalPeriod = periodStr;
+    const [year, month] = periodStr.split('-').map(Number);
+    const range = getWIBMonthRange(year, month);
+    startDate = range.startDate;
+    endDate = range.endDate;
   } else {
     const range = calculateSalaryCycleDateRange(cutoffDay, new Date());
     startDate = range.startDate;
     endDate = range.endDate;
+    canonicalPeriod = range.cycleMonthPeriod;
   }
 
   // 1. Fetch budgets for this period
@@ -139,10 +189,10 @@ export async function getBudgetStatus(
     .from('budgets')
     .select('id, limit_amount, category_id, categories(id, name)')
     .eq('user_id', userId)
-    .eq('period', targetPeriod);
+    .eq('period', canonicalPeriod);
 
   if (budgetError) {
-    logger.error('DB:Budgets', 'Error fetching budgets', budgetError, { userId, targetPeriod });
+    logger.error('DB:Budgets', 'Error fetching budgets', budgetError, { userId, canonicalPeriod });
     throw budgetError;
   }
 
@@ -173,35 +223,36 @@ export async function getBudgetStatus(
     .lte('transaction_date', endDate);
 
   if (txError) {
-    logger.error('DB:Budgets', 'Error fetching transactions for budget status', txError, { userId, targetPeriod });
+    logger.error('DB:Budgets', 'Error fetching transactions for budget status', txError, { userId, canonicalPeriod });
   }
 
-  // Group spent amounts by category_id
-  const spentByCategoryId: Record<string, { name: string; amount: number }> = {};
+  // Group spent amounts by category_id using cent integer arithmetic
+  const spentByCategoryId: Record<string, { name: string; amountCents: number }> = {};
   for (const tx of txs || []) {
-    // @ts-ignore
-    const catId = tx.category_id || 'uncategorized';
+    const catId = (tx.category_id as string) || 'uncategorized';
     // @ts-ignore
     const catName = tx.categories?.name || 'Lain-lain';
 
     if (!spentByCategoryId[catId]) {
-      spentByCategoryId[catId] = { name: catName, amount: 0 };
+      spentByCategoryId[catId] = { name: catName, amountCents: 0 };
     }
-    spentByCategoryId[catId].amount += Number(tx.amount || 0);
+    const amtCents = Math.round((Number(tx.amount) || 0) * 100);
+    spentByCategoryId[catId].amountCents += amtCents;
   }
 
-  const categoryMap = new Map<string, { categoryName: string; limitAmount: number; spentAmount: number }>();
+  const categoryMap = new Map<string, { categoryId: string; categoryName: string; limitAmount: number; spentAmount: number }>();
 
   // Add configured budgets
   for (const b of activeBudgets) {
-    // @ts-ignore
-    const catId = b.category_id;
+    const catId = b.category_id as string;
     // @ts-ignore
     const catName = b.categories?.name || 'Kategori';
     const limit = Number(b.limit_amount || 0);
-    const spent = spentByCategoryId[catId]?.amount || 0;
+    const spentCents = spentByCategoryId[catId]?.amountCents || 0;
+    const spent = Math.round(spentCents) / 100;
 
     categoryMap.set(catId, {
+      categoryId: catId,
       categoryName: catName,
       limitAmount: limit,
       spentAmount: spent,
@@ -212,21 +263,23 @@ export async function getBudgetStatus(
   for (const [catId, data] of Object.entries(spentByCategoryId)) {
     if (!categoryMap.has(catId)) {
       categoryMap.set(catId, {
+        categoryId: catId,
         categoryName: data.name,
         limitAmount: 0,
-        spentAmount: data.amount,
+        spentAmount: Math.round(data.amountCents) / 100,
       });
     }
   }
 
-  const results = [];
+  const results: BudgetCategoryStatus[] = [];
   for (const [_, item] of categoryMap) {
     const limitAmount = item.limitAmount;
     const spentAmount = item.spentAmount;
-    const remainingAmount = limitAmount > 0 ? limitAmount - spentAmount : 0;
+    const remainingAmount = limitAmount > 0 ? Math.max(0, limitAmount - spentAmount) : 0;
     const percentageSpent = limitAmount > 0 ? Math.round((spentAmount / limitAmount) * 100) : 0;
 
     results.push({
+      categoryId: item.categoryId,
       categoryName: item.categoryName,
       limitAmount,
       spentAmount,

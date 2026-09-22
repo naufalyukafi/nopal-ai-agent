@@ -262,6 +262,24 @@ export async function syncGmailMessagesForUser(
         // Parse email using Gemini Structured JSON Output with user active categories
         const parsed = await parseEmailContentWithGemini(subject, snippet, bodyText, activeCategories);
 
+        // Extract accurate transaction date from Gmail message internalDate (epoch ms) or Date header
+        let emailTxDate: string | undefined = undefined;
+        if (msgData.internalDate) {
+          const epochMs = Number(msgData.internalDate);
+          if (!isNaN(epochMs) && epochMs > 0) {
+            emailTxDate = new Date(epochMs).toISOString();
+          }
+        }
+        if (!emailTxDate) {
+          const dateHeader = headers.find((h) => h.name.toLowerCase() === 'date');
+          if (dateHeader?.value) {
+            const parsedHeaderDate = new Date(dateHeader.value);
+            if (!isNaN(parsedHeaderDate.getTime())) {
+              emailTxDate = parsedHeaderDate.toISOString();
+            }
+          }
+        }
+
         if (parsed.isReceipt && parsed.amount > 0) {
           const createdTx = await createPendingEmailTransaction({
             userId,
@@ -270,6 +288,7 @@ export async function syncGmailMessagesForUser(
             description: parsed.description || subject,
             gmailMessageId: msgRef.id,
             rawMetadata: { subject, snippet, merchant: parsed.merchantName },
+            transactionDate: emailTxDate,
           });
 
           if (createdTx) {

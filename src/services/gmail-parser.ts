@@ -136,11 +136,13 @@ export async function createPendingEmailTransaction(params: {
   description: string;
   gmailMessageId: string;
   rawMetadata: Record<string, any>;
+  transactionDate?: string;
 }) {
   const supabase = getSupabaseClient();
 
   // Find or create category ID
   const categoryId = await getOrCreateCategoryByName(params.userId, params.categoryName);
+  const txDate = params.transactionDate || new Date().toISOString();
 
   const { data: tx, error } = await supabase
     .from('transactions')
@@ -153,7 +155,7 @@ export async function createPendingEmailTransaction(params: {
       status: 'pending_confirmation', // Human in the loop requirement
       gmail_message_id: params.gmailMessageId,
       raw_metadata: params.rawMetadata,
-      transaction_date: new Date().toISOString(),
+      transaction_date: txDate,
     })
     .select('*')
     .single();
