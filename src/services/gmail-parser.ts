@@ -12,6 +12,11 @@ export interface ExtractedEmailReceipt {
   description?: string;
 }
 
+function getApiKeys(): string[] {
+  const raw = env.GEMINI_API_KEY || '';
+  return raw.split(',').map((k) => k.trim()).filter(Boolean);
+}
+
 export function stripHtmlToPlainText(html: string): string {
   if (!html) return '';
   return html
@@ -26,21 +31,53 @@ export function stripHtmlToPlainText(html: string): string {
     .trim();
 }
 
+/**
+ * Fast, 0-token local heuristic filter to weed out newsletters, OTPs, promotions,
+ * and non-financial emails before spending API quota on Gemini.
+ */
+export function isLikelyFinancialEmail(subject: string, snippet: string, bodyText: string): boolean {
+  const cleanSubject = (subject || '').toLowerCase();
+  const combined = `${cleanSubject} ${(snippet || '').toLowerCase()} ${(bodyText || '').slice(0, 1000).toLowerCase()}`;
+
+  // Direct skip obvious non-financial noise
+  if (
+    /unsubscribe|newsletter|berlangganan|lowongan|job alert|security alert|login baru|kode otp|verifikasi akun/i.test(cleanSubject) &&
+    !/pembayaran|berhasil|transaksi|sukses|receipt|invoice|struk|qris/i.test(cleanSubject)
+  ) {
+    return false;
+  }
+
+  // Strong transaction indicators in subject line (almost certainly a transaction)
+  if (/pembayaran|transaksi|berhasil|receipt|invoice|kuitansi|struk|pesanan|order|qris|tagihan|billing/i.test(cleanSubject)) {
+    return true;
+  }
+
+  // Body and snippet financial indicators
+  const indicators = [
+    /pembayaran|transaksi|receipt|invoice|kuitansi|struk|order|pesanan|terbayar|lunas|debet|debit|qris|transfer/i,
+    /total bayar|total pembayaran|jumlah pembayaran|total harga|subtotal|amount paid|grand total/i,
+    /rp\s*[\d.,]+|idr\s*[\d.,]+|\$\s*[\d.]+/i,
+    /bca|mandiri|bni|bri|cimb|jago|jenius|gopay|ovo|dana|shopeepay|alfagift|indomaret|tokopedia|grab|gojek|shopee/i,
+  ];
+
+  const matchedCount = indicators.filter((pattern) => pattern.test(combined)).length;
+  return matchedCount >= 2;
+}
+
 export async function parseEmailContentWithGemini(
   subject: string,
   snippet: string,
   body: string,
   userActiveCategories?: string[]
 ): Promise<ExtractedEmailReceipt> {
-  const apiKey = env.GEMINI_API_KEY;
-  const modelName = env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const keys = getApiKeys();
+  const modelName = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 
-  if (!apiKey) {
+  if (keys.length === 0) {
     logger.warn('GmailParser', 'GEMINI_API_KEY is not set. Skipping email parsing.');
     return { isReceipt: false, amount: 0 };
   }
 
-  const ai = new GoogleGenAI({ apiKey });
   const cleanBody = stripHtmlToPlainText(body);
 
   const catPromptList = userActiveCategories && userActiveCategories.length > 0
@@ -66,67 +103,81 @@ EXTRACTION RULES:
 6. "description": A short clean summary (e.g., "Pembayaran ke HC BRAVO BOJONEGORO").
 `;
 
-  try {
-    logger.info('GmailParser', `Parsing email using Gemini Structured JSON Output (${modelName})`, { subject });
+  let lastError: any;
 
-    // Official Gemini Structured Output Mode (Guarantees 100% valid JSON)
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            isReceipt: { type: Type.BOOLEAN, description: 'True if email is a successful expense receipt' },
-            amount: { type: Type.NUMBER, description: 'Parsed amount' },
-            currency: { type: Type.STRING, description: 'Currency code: IDR, USD, EUR' },
-            merchantName: { type: Type.STRING, description: 'Payee or merchant name' },
-            categoryName: { type: Type.STRING, description: 'Category name' },
-            description: { type: Type.STRING, description: 'Transaction description' },
+  // Key rotation and fallback loop across configured API keys
+  for (const apiKey of keys) {
+    try {
+      logger.info('GmailParser', `Parsing email using Gemini (${modelName})`, { subject });
+      const ai = new GoogleGenAI({ apiKey });
+
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isReceipt: { type: Type.BOOLEAN, description: 'True if email is a successful expense receipt' },
+              amount: { type: Type.NUMBER, description: 'Parsed amount' },
+              currency: { type: Type.STRING, description: 'Currency code: IDR, USD, EUR' },
+              merchantName: { type: Type.STRING, description: 'Payee or merchant name' },
+              categoryName: { type: Type.STRING, description: 'Category name' },
+              description: { type: Type.STRING, description: 'Transaction description' },
+            },
+            required: ['isReceipt', 'amount'],
           },
-          required: ['isReceipt', 'amount'],
         },
-      },
-    });
+      });
 
-    const parsed = JSON.parse(response.text || '{}');
-    const rawAmount = Number(parsed.amount) || 0;
-    const rawCurrency = (parsed.currency || 'IDR').toUpperCase();
+      const parsed = JSON.parse(response.text || '{}');
+      const rawAmount = Number(parsed.amount) || 0;
+      const rawCurrency = (parsed.currency || 'IDR').toUpperCase();
 
-    let idrAmount = Math.round(rawAmount);
-    let desc = parsed.description || parsed.merchantName || subject;
+      let idrAmount = Math.round(rawAmount);
+      let desc = parsed.description || parsed.merchantName || subject;
 
-    // Convert foreign currencies to IDR
-    if (rawCurrency === 'USD') {
-      idrAmount = Math.round(rawAmount * 16000); // 1 USD = Rp 16.000
-      desc = `${desc} ($${rawAmount} USD)`;
-    } else if (rawCurrency === 'EUR') {
-      idrAmount = Math.round(rawAmount * 17500); // 1 EUR = Rp 17.500
-      desc = `${desc} (€${rawAmount} EUR)`;
+      // Convert foreign currencies to IDR
+      if (rawCurrency === 'USD') {
+        idrAmount = Math.round(rawAmount * 16000); // 1 USD = Rp 16.000
+        desc = `${desc} ($${rawAmount} USD)`;
+      } else if (rawCurrency === 'EUR') {
+        idrAmount = Math.round(rawAmount * 17500); // 1 EUR = Rp 17.500
+        desc = `${desc} (€${rawAmount} EUR)`;
+      }
+
+      const result: ExtractedEmailReceipt = {
+        isReceipt: Boolean(parsed.isReceipt),
+        amount: idrAmount,
+        merchantName: parsed.merchantName || 'Merchant',
+        categoryName: parsed.categoryName || 'Lain-lain',
+        description: desc,
+      };
+
+      logger.info('GmailParser', `Email parsed successfully via Gemini Structured Output`, {
+        isReceipt: result.isReceipt,
+        amount: result.amount,
+        rawCurrency,
+        merchant: result.merchantName,
+        category: result.categoryName,
+      });
+
+      return result;
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = String(err?.message || err);
+      if (errMsg.includes('429') || errMsg.includes('Quota') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+        logger.warn('GmailParser', `Quota/Rate limit hit during email parsing. Trying next API key if available...`, { error: errMsg });
+        continue;
+      }
+      logger.error('GmailParser', 'Error parsing email content with Gemini Structured Output', err, { subject });
+      return { isReceipt: false, amount: 0 };
     }
-
-    const result: ExtractedEmailReceipt = {
-      isReceipt: Boolean(parsed.isReceipt),
-      amount: idrAmount,
-      merchantName: parsed.merchantName || 'Merchant',
-      categoryName: parsed.categoryName || 'Lain-lain',
-      description: desc,
-    };
-
-    logger.info('GmailParser', `Email parsed successfully via Gemini Structured Output`, {
-      isReceipt: result.isReceipt,
-      amount: result.amount,
-      rawCurrency,
-      merchant: result.merchantName,
-      category: result.categoryName,
-    });
-
-    return result;
-  } catch (err) {
-    logger.error('GmailParser', 'Error parsing email content with Gemini Structured Output', err, { subject });
-    return { isReceipt: false, amount: 0 };
   }
+
+  logger.error('GmailParser', 'All API keys exhausted or rate limited during email parsing', lastError, { subject });
+  return { isReceipt: false, amount: 0 };
 }
 
 export async function createPendingEmailTransaction(params: {

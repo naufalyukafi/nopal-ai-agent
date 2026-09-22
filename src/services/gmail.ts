@@ -172,7 +172,7 @@ export async function syncGmailMessagesForUser(
   noAccounts?: boolean;
   errors?: string[];
 }> {
-  const { parseEmailContentWithGemini, createPendingEmailTransaction } = await import('./gmail-parser.ts');
+  const { parseEmailContentWithGemini, createPendingEmailTransaction, isLikelyFinancialEmail } = await import('./gmail-parser.ts');
   const { sendTelegramConfirmationNotification } = await import('./telegram-callback.ts');
   const supabase = getSupabaseClient();
 
@@ -216,9 +216,9 @@ export async function syncGmailMessagesForUser(
         queryParam = `after:${afterUnix}`;
       }
 
-      // Search messages using timestamp cursor
+      // Search messages using timestamp cursor (limit to 10 to keep batch light)
       const listRes = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(queryParam)}&maxResults=15`,
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(queryParam)}&maxResults=10`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
 
@@ -258,6 +258,14 @@ export async function syncGmailMessagesForUser(
         const bodyText = extractBodyFromPayload(msgData.payload) || snippet;
 
         totalProcessed++;
+
+        // Fast local pre-filter: skip obvious non-financial emails without burning Gemini RPM quota
+        if (!isLikelyFinancialEmail(subject, snippet, bodyText)) {
+          continue;
+        }
+
+        // Rate limit safety throttle: pause 1.5s between Gemini parsing calls to guarantee < 15 RPM
+        await new Promise((resolve) => setTimeout(resolve, 1500));
 
         // Parse email using Gemini Structured JSON Output with user active categories
         const parsed = await parseEmailContentWithGemini(subject, snippet, bodyText, activeCategories);
