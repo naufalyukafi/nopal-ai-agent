@@ -171,7 +171,7 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
     }
 
     // Answer callback query so button stops loading indicator
-    if (botToken) {
+    if (botToken && callbackId) {
       await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -181,7 +181,21 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
         }),
       });
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error handling callback query:', err);
+    if (botToken && callbackId) {
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callback_query_id: callbackId,
+            text: `Gagal: ${err?.message || 'Terjadi kesalahan sistem'}`,
+          }),
+        });
+      } catch (answerErr) {
+        console.warn('Failed to send error callback answer:', answerErr);
+      }
+    }
   }
 }

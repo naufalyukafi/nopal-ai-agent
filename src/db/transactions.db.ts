@@ -11,6 +11,12 @@ export async function createManualTransaction(params: {
   categoryName?: string;
   description?: string;
 }): Promise<Transaction> {
+  const rawAmount = Number(params.amount);
+  if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+    throw new Error('Nominal transaksi harus berupa angka positif yang valid (lebih besar dari 0).');
+  }
+  const cleanAmount = Math.round(rawAmount);
+
   const supabase = getSupabaseClient();
 
   // 1. Resolve or create category_id if categoryName is provided
@@ -24,7 +30,7 @@ export async function createManualTransaction(params: {
     .from('transactions')
     .insert({
       user_id: params.userId,
-      amount: params.amount,
+      amount: cleanAmount,
       category_id: categoryId,
       description: params.description || null,
       source: 'manual',

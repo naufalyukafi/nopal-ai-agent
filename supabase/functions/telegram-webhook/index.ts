@@ -6,6 +6,7 @@ import { handleTelegramCallbackQuery } from '../../../src/services/telegram-call
 import { checkAndSendBudgetAlerts } from '../../../src/services/budget-alert.ts';
 import { env } from '../../../src/config/env.ts';
 import { logger } from '../../../src/utils/logger.ts';
+import { parseQuickExpenseInput } from '../../../src/utils/quick-expense.ts';
 
 declare const EdgeRuntime: any;
 
@@ -76,6 +77,26 @@ async function sendTelegramMessage(chatId: number, text: string, replyMarkup?: a
     }
   } catch (err) {
     logger.error('TelegramWebhook', 'Exception while sending Telegram message', err, { chatId });
+  }
+}
+
+// Helper to send chat action (e.g. 'typing') to Telegram
+async function sendChatAction(chatId: number, action: string = 'typing') {
+  const botToken = env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return;
+
+  const url = `https://api.telegram.org/bot${botToken}/sendChatAction`;
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        action,
+      }),
+    });
+  } catch (err) {
+    logger.debug('TelegramWebhook', 'Failed to send chat action to Telegram', { error: String(err) });
   }
 }
 
@@ -456,7 +477,60 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
       return c.json({ ok: true, status: 'fast_gmail_sync' });
     }
 
+    // FAST ROUTE 6: Direct Shorthand Expense Logging (<300ms, 0 Gemini Tokens)
+    const quickExpense = parseQuickExpenseInput(userText);
+    if (quickExpense) {
+      const fastTask = async () => {
+        try {
+          const { createManualTransaction } = await import('../../../src/db/transactions.db.ts');
+          const { getBudgetStatus } = await import('../../../src/db/budgets.db.ts');
+
+          const tx = await createManualTransaction({
+            userId: user.id,
+            amount: quickExpense.amount,
+            categoryName: quickExpense.categoryName,
+            description: quickExpense.description,
+          });
+
+          // Fetch updated budget status for this category
+          let budgetNote = '';
+          try {
+            const statuses = await getBudgetStatus(user.id);
+            const matched = statuses.find((s) => s.categoryId === tx.category_id || s.categoryName === quickExpense.categoryName);
+            if (matched && matched.limitAmount > 0) {
+              budgetNote = `\n• Sisa Anggaran ${matched.categoryName}: Rp ${matched.remainingAmount.toLocaleString('id-ID')} (${matched.percentageSpent}% terpakai)`;
+            }
+          } catch {
+            // Non-blocking status lookup
+          }
+
+          const msg = `✅ *Transaksi Berhasil Dicatat*\n\n` +
+            `• Nominal: *Rp ${quickExpense.amount.toLocaleString('id-ID')}*\n` +
+            `• Kategori: *${quickExpense.categoryName}*\n` +
+            `• Deskripsi: _${quickExpense.description}_` +
+            budgetNote;
+
+          await sendTelegramMessage(chatId, msg);
+          await checkAndSendBudgetAlerts(user.id, chatId);
+        } catch (err: any) {
+          logger.error('TelegramWebhook', 'Error in fast route quick expense', err);
+          await sendTelegramMessage(chatId, `Gagal mencatat transaksi: ${err?.message || 'Terjadi kesalahan sistem'}`);
+        }
+      };
+
+      if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(fastTask());
+      } else {
+        fastTask();
+      }
+      return c.json({ ok: true, status: 'fast_quick_expense' });
+    }
+
     // 2. Trigger async background processing for AI requests
+    // Fire Telegram typing indicator immediately so user knows bot received their message
+    sendChatAction(chatId, 'typing');
+
     const backgroundTask = async () => {
       try {
         const replyText = await processAgentMessage(user.id, userText);

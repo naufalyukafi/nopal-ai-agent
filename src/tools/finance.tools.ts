@@ -1,4 +1,5 @@
 import { createManualTransaction, getRecentTransactions, getPendingTransactions, confirmAllPendingTransactions } from '../db/transactions.db.ts';
+import { env } from '../config/env.ts';
 
 export const financeToolDeclarations = [
   {
@@ -135,7 +136,7 @@ export async function executeFinanceTool(toolName: string, args: Record<string, 
   }
 
   if (toolName === 'get_gmail_auth_link') {
-    const supabaseUrl = process.env.SUPABASE_URL || 'https://pobbqgnckilmqmrpiaod.supabase.co';
+    const supabaseUrl = env.SUPABASE_URL || 'https://pobbqgnckilmqmrpiaod.supabase.co';
     const authUrl = `${supabaseUrl}/functions/v1/gmail-sync/auth?userId=${userId}`;
     return {
       success: true,

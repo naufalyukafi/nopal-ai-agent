@@ -105,24 +105,19 @@ app.all('/gmail-sync/process', async (c) => {
     logger.info('GmailSyncCron', `Found ${activeAccounts.length} active email account(s) to process`, { count: activeAccounts.length });
 
     const { syncGmailMessagesForUser } = await import('../../../src/services/gmail.ts');
-    const chunkSize = 5;
     let totalProcessed = 0;
     let totalNewReceipts = 0;
 
-    for (let i = 0; i < activeAccounts.length; i += chunkSize) {
-      const chunk = activeAccounts.slice(i, i + chunkSize);
-      const results = await Promise.allSettled(
-        chunk.map((acc: any) => {
-          const telegramId = acc.users?.telegram_id;
-          return syncGmailMessagesForUser(acc.user_id, telegramId);
-        })
-      );
-
-      for (const res of results) {
-        if (res.status === 'fulfilled') {
-          totalProcessed += res.value.processed;
-          totalNewReceipts += res.value.newReceipts;
-        }
+    // Process accounts sequentially in background cron to strictly protect Gemini 15 RPM Free Tier quota
+    for (const acc of activeAccounts) {
+      try {
+        const userObj: any = acc.users;
+        const telegramId = Array.isArray(userObj) ? userObj[0]?.telegram_id : userObj?.telegram_id;
+        const res = await syncGmailMessagesForUser(acc.user_id, telegramId);
+        totalProcessed += res.processed;
+        totalNewReceipts += res.newReceipts;
+      } catch (accErr) {
+        logger.error('GmailSyncCron', `Failed syncing account for user ${acc.user_id}`, accErr);
       }
     }
 
