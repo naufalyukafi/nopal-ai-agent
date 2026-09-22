@@ -2,7 +2,8 @@ import { getSupabaseClient } from './supabase.ts';
 import type { Transaction } from '../types/index.ts';
 import { logger } from '../utils/logger.ts';
 import { logAuditEvent } from './audit.db.ts';
-import { getOrCreateCategoryByName } from './budgets.db.ts';
+import { getOrCreateCategoryByName, calculateSalaryCycleDateRange } from './budgets.db.ts';
+import { getUserSalaryCutoffDay } from './users.db.ts';
 import { getWIBTodayRange, getWIBMonthRange, getWIBMonthPeriod } from '../utils/date.ts';
 
 export async function createManualTransaction(params: {
@@ -186,9 +187,20 @@ export async function getMonthlyCategorySummary(
   periodStr?: string // e.g. '2026-09'
 ): Promise<{ categoryName: string; totalAmount: number }[]> {
   const supabase = getSupabaseClient();
-  const targetPeriod = periodStr || getWIBMonthPeriod();
-  const [year, month] = targetPeriod.split('-').map(Number);
-  const { startDate, endDate } = getWIBMonthRange(year, month);
+  let startDate: string;
+  let endDate: string;
+
+  if (periodStr) {
+    const [year, month] = periodStr.split('-').map(Number);
+    const range = getWIBMonthRange(year, month);
+    startDate = range.startDate;
+    endDate = range.endDate;
+  } else {
+    const cutoffDay = await getUserSalaryCutoffDay(userId);
+    const range = calculateSalaryCycleDateRange(cutoffDay, new Date());
+    startDate = range.startDate;
+    endDate = range.endDate;
+  }
 
   const { data, error } = await supabase
     .from('transactions')
