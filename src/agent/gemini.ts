@@ -19,23 +19,21 @@ async function generateContentWithFallback(
     throw new Error('GEMINI_API_KEY is not configured.');
   }
 
+  // Only fast, low-latency 15 RPM models. Avoid heavy reasoning models (gemini-3.7/3.6) that add 5-10s latency
   const fallbackModels = [
     primaryModel,
     'gemini-3.5-flash-lite',
     'gemini-3.5-flash',
-    'gemini-3.7-flash',
-    'gemini-3.6-flash',
   ];
   const modelsToTry = Array.from(new Set(fallbackModels));
 
   let lastError: any;
 
-  // Try across available API keys and models
-  for (const apiKey of keys) {
-    const ai = new GoogleGenAI({ apiKey });
-
-    for (const model of modelsToTry) {
+  // Inverted loop: Try all API keys on the fastest model FIRST before falling back to heavier models
+  for (const model of modelsToTry) {
+    for (const apiKey of keys) {
       try {
+        const ai = new GoogleGenAI({ apiKey });
         return await ai.models.generateContent({
           model,
           contents,
@@ -45,7 +43,7 @@ async function generateContentWithFallback(
         lastError = err;
         const errMsg = String(err?.message || err);
         if (errMsg.includes('429') || errMsg.includes('Quota') || errMsg.includes('RESOURCE_EXHAUSTED')) {
-          logger.warn('Agent', `Quota/Rate limit hit on model '${model}'. Trying next key/model fallback...`, { error: errMsg });
+          logger.warn('Agent', `Quota/Rate limit hit on model '${model}'. Trying next API key immediately...`, { error: errMsg });
           continue;
         }
         throw err;
@@ -222,6 +220,19 @@ STRICT GUARDRAILS & PROMPT INJECTION PROTECTION:
 
         if (toolResult && toolResult.message) {
           lastToolMessage = toolResult.message;
+        }
+
+        // Fast-path for single execution of action tools:
+        // Returns the clean confirmation directly without incurring a redundant second LLM call
+        if (
+          functionCalls.length === 1 &&
+          toolResult?.message &&
+          (toolCall.name === 'record_manual_transaction' ||
+           toolCall.name === 'update_transaction_category' ||
+           toolCall.name === 'confirm_all_pending')
+        ) {
+          await saveChatMessage({ userId, role: 'model', content: toolResult.message });
+          return toolResult.message;
         }
 
         logger.info('Agent', `Tool execution completed`, { toolName: toolCall.name, success: toolResult.success });
