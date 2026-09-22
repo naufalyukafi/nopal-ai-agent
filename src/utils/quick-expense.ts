@@ -138,3 +138,33 @@ export function parseQuickExpenseInput(text: string): ParsedQuickExpense | null 
     categoryName,
   };
 }
+
+/**
+ * Parses single or multi-line shorthand expense entries.
+ * Returns array of ParsedQuickExpense if ALL non-empty lines match shorthand syntax.
+ * Returns null if text is conversational, ambiguous, or contains non-shorthand lines.
+ */
+export function parseMultiLineQuickExpense(text: string): ParsedQuickExpense[] | null {
+  if (!text) return null;
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0 || lines.length > 10) {
+    return null;
+  }
+
+  const results: ParsedQuickExpense[] = [];
+  for (const line of lines) {
+    const parsed = parseQuickExpenseInput(line);
+    if (!parsed) {
+      // If even 1 line fails, abort multi-line route so AI gets the full text
+      return null;
+    }
+    results.push(parsed);
+  }
+
+  return results.length > 0 ? results : null;
+}
+

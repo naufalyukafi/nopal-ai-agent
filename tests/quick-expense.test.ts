@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseQuickExpenseInput, inferCategoryFromDescription } from '../src/utils/quick-expense.ts';
+import { parseQuickExpenseInput, parseMultiLineQuickExpense, inferCategoryFromDescription } from '../src/utils/quick-expense.ts';
 
 test('parseQuickExpenseInput parses various Indonesian shorthand amounts', () => {
   // 25k format
@@ -73,3 +73,29 @@ test('parseQuickExpenseInput ignores conversational text and commands', () => {
   assert.equal(parseQuickExpenseInput('bagaimana cara berhemat bulan ini?'), null);
   assert.equal(parseQuickExpenseInput('cek budget'), null);
 });
+
+test('parseMultiLineQuickExpense parses multiple valid shorthand entries in batch', () => {
+  const multiText = `
+    kopi 25k
+    bensin 30rb
+    parkir 5000
+  `;
+  const result = parseMultiLineQuickExpense(multiText);
+  assert.ok(result);
+  assert.equal(result.length, 3);
+  assert.equal(result[0].description, 'Kopi');
+  assert.equal(result[0].amount, 25000);
+  assert.equal(result[1].description, 'Bensin');
+  assert.equal(result[1].amount, 30000);
+  assert.equal(result[2].description, 'Parkir');
+  assert.equal(result[2].amount, 5000);
+});
+
+test('parseMultiLineQuickExpense returns null if any line is invalid or conversational', () => {
+  const mixedText = `
+    kopi 25k
+    tolong dong berapa sisa budget saya
+  `;
+  assert.equal(parseMultiLineQuickExpense(mixedText), null);
+});
+

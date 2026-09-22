@@ -151,10 +151,10 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
           }),
         });
       }
-    } else if (data.startsWith('reject_tx_')) {
-      const txId = data.replace('reject_tx_', '');
+    } else if (data.startsWith('delete_tx_') || data.startsWith('reject_tx_')) {
+      const txId = data.replace(/^(delete_tx_|reject_tx_)/, '');
       const tx = await rejectTransaction(txId, userId);
-      answerText = 'Transaksi dibatalkan.';
+      answerText = 'Transaksi berhasil dibatalkan.';
 
       if (botToken && chatId && messageId) {
         await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
@@ -163,7 +163,33 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
           body: JSON.stringify({
             chat_id: chatId,
             message_id: messageId,
-            text: `*Transaksi Dibatalkan*\nNominal: Rp ${Number(tx.amount).toLocaleString('id-ID')}`,
+            text: `~Transaksi Dibatalkan~\n\nNominal: ~Rp ${Number(tx.amount).toLocaleString('id-ID')}~\nDeskripsi: ~${tx.description || '-'}~\n\n_Transaksi ini telah dihapus dari catatan keuangan._`,
+            parse_mode: 'Markdown',
+          }),
+        });
+      }
+    } else if (data.startsWith('delete_batch_')) {
+      const txIds = data.replace('delete_batch_', '').split('_');
+      let totalReverted = 0;
+      for (const id of txIds) {
+        if (!id) continue;
+        try {
+          await rejectTransaction(id, userId);
+          totalReverted++;
+        } catch {
+          // Continue to next tx
+        }
+      }
+      answerText = `${totalReverted} transaksi berhasil dibatalkan.`;
+
+      if (botToken && chatId && messageId) {
+        await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: messageId,
+            text: `~Batch Transaksi Dibatalkan~\n\n_${totalReverted} transaksi telah berhasil dibatalkan dan dihapus dari catatan keuangan._`,
             parse_mode: 'Markdown',
           }),
         });

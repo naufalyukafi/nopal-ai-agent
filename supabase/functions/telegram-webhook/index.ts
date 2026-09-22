@@ -6,7 +6,7 @@ import { handleTelegramCallbackQuery } from '../../../src/services/telegram-call
 import { checkAndSendBudgetAlerts } from '../../../src/services/budget-alert.ts';
 import { env } from '../../../src/config/env.ts';
 import { logger } from '../../../src/utils/logger.ts';
-import { parseQuickExpenseInput } from '../../../src/utils/quick-expense.ts';
+import { parseQuickExpenseInput, parseMultiLineQuickExpense } from '../../../src/utils/quick-expense.ts';
 
 declare const EdgeRuntime: any;
 
@@ -481,43 +481,113 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
       return c.json({ ok: true, status: 'fast_gmail_sync' });
     }
 
-    // FAST ROUTE 6: Direct Shorthand Expense Logging (<300ms, 0 Gemini Tokens)
-    const quickExpense = parseQuickExpenseInput(userText);
-    if (quickExpense) {
+    // FAST ROUTE 6: Direct Shorthand Expense Logging (Single & Multi-line, <350ms, 0 Gemini Tokens)
+    const multiExpenses = parseMultiLineQuickExpense(userText);
+    if (multiExpenses && multiExpenses.length > 0) {
       const fastTask = async () => {
         try {
           await sendChatAction(chatId, 'typing');
 
           const { createManualTransaction } = await import('../../../src/db/transactions.db.ts');
           const { getBudgetStatus } = await import('../../../src/db/budgets.db.ts');
+          const { getSmartDailyLimitStatus } = await import('../../../src/db/daily-limit.db.ts');
 
-          const tx = await createManualTransaction({
-            userId: user.id,
-            amount: quickExpense.amount,
-            categoryName: quickExpense.categoryName,
-            description: quickExpense.description,
-          });
+          if (multiExpenses.length === 1) {
+            // Single shorthand transaction
+            const item = multiExpenses[0];
+            const tx = await createManualTransaction({
+              userId: user.id,
+              amount: item.amount,
+              categoryName: item.categoryName,
+              description: item.description,
+            });
 
-          // Fetch updated budget status for this category
-          let budgetNote = '';
-          try {
-            const statuses = await getBudgetStatus(user.id);
-            const matched = statuses.find((s) => s.categoryId === tx.category_id || s.categoryName === quickExpense.categoryName);
-            if (matched && matched.limitAmount > 0) {
-              budgetNote = `\n• Sisa Anggaran ${matched.categoryName}: Rp ${matched.remainingAmount.toLocaleString('id-ID')} (${matched.percentageSpent}% terpakai)`;
+            let budgetNote = '';
+            try {
+              const statuses = await getBudgetStatus(user.id);
+              const matched = statuses.find((s) => s.categoryId === tx.category_id || s.categoryName === item.categoryName);
+              if (matched && matched.limitAmount > 0) {
+                budgetNote = `\n• Sisa Anggaran ${matched.categoryName}: Rp ${matched.remainingAmount.toLocaleString('id-ID')} (${matched.percentageSpent}% terpakai)`;
+              }
+            } catch {
+              // Non-blocking
             }
-          } catch {
-            // Non-blocking status lookup
+
+            let dailyNote = '';
+            try {
+              const daily = await getSmartDailyLimitStatus(user.id);
+              if (daily.recommendedDailyLimit > 0) {
+                if (daily.todayRemainingLimit >= 0) {
+                  dailyNote = `\n• Sisa Jatah Hari Ini: Rp ${daily.todayRemainingLimit.toLocaleString('id-ID')} (${daily.status === 'SAFE' ? 'Aman' : 'Waspada'})`;
+                } else {
+                  dailyNote = `\n• Melebihi Jatah Hari Ini: Rp ${Math.abs(daily.todayRemainingLimit).toLocaleString('id-ID')} (Over limit)`;
+                }
+              }
+            } catch {
+              // Non-blocking
+            }
+
+            const msg = `✅ *Transaksi Berhasil Dicatat*\n\n` +
+              `• Nominal: *Rp ${item.amount.toLocaleString('id-ID')}*\n` +
+              `• Kategori: *${item.categoryName}*\n` +
+              `• Deskripsi: _${item.description}_` +
+              budgetNote +
+              dailyNote;
+
+            const inlineKeyboard = {
+              inline_keyboard: [
+                [{ text: '🗑️ Batalkan Transaksi', callback_data: `delete_tx_${tx.id}` }],
+              ],
+            };
+
+            await sendTelegramMessage(chatId, msg, inlineKeyboard);
+            await checkAndSendBudgetAlerts(user.id, chatId);
+          } else {
+            // Multi-line batch shorthand transactions
+            const createdTxs = [];
+            let totalBatchAmount = 0;
+            for (const item of multiExpenses) {
+              const tx = await createManualTransaction({
+                userId: user.id,
+                amount: item.amount,
+                categoryName: item.categoryName,
+                description: item.description,
+              });
+              createdTxs.push(tx);
+              totalBatchAmount += item.amount;
+            }
+
+            let dailyNote = '';
+            try {
+              const daily = await getSmartDailyLimitStatus(user.id);
+              if (daily.recommendedDailyLimit > 0) {
+                if (daily.todayRemainingLimit >= 0) {
+                  dailyNote = `\n• Sisa Jatah Hari Ini: Rp ${daily.todayRemainingLimit.toLocaleString('id-ID')} (${daily.status === 'SAFE' ? 'Aman' : 'Waspada'})`;
+                } else {
+                  dailyNote = `\n• Melebihi Jatah Hari Ini: Rp ${Math.abs(daily.todayRemainingLimit).toLocaleString('id-ID')} (Over limit)`;
+                }
+              }
+            } catch {
+              // Non-blocking
+            }
+
+            let msg = `✅ *${createdTxs.length} Transaksi Berhasil Dicatat*\n\n`;
+            multiExpenses.forEach((item, idx) => {
+              msg += `${idx + 1}. *Rp ${item.amount.toLocaleString('id-ID')}* — ${item.description} (${item.categoryName})\n`;
+            });
+            msg += `\n• Total Pengeluaran: *Rp ${totalBatchAmount.toLocaleString('id-ID')}*`;
+            msg += dailyNote;
+
+            const txIds = createdTxs.map((t) => t.id).join('_');
+            const inlineKeyboard = {
+              inline_keyboard: [
+                [{ text: '🗑️ Batalkan Semua', callback_data: `delete_batch_${txIds}` }],
+              ],
+            };
+
+            await sendTelegramMessage(chatId, msg, inlineKeyboard);
+            await checkAndSendBudgetAlerts(user.id, chatId);
           }
-
-          const msg = `✅ *Transaksi Berhasil Dicatat*\n\n` +
-            `• Nominal: *Rp ${quickExpense.amount.toLocaleString('id-ID')}*\n` +
-            `• Kategori: *${quickExpense.categoryName}*\n` +
-            `• Deskripsi: _${quickExpense.description}_` +
-            budgetNote;
-
-          await sendTelegramMessage(chatId, msg);
-          await checkAndSendBudgetAlerts(user.id, chatId);
         } catch (err: any) {
           logger.error('TelegramWebhook', 'Error in fast route quick expense', err);
           await sendTelegramMessage(chatId, `Gagal mencatat transaksi: ${err?.message || 'Terjadi kesalahan sistem'}`);
