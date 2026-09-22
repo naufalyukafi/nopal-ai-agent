@@ -12,9 +12,9 @@
     "deploy:db": "npx supabase db push",
     "deploy:secrets": "npx supabase secrets set --env-file supabase/functions/.env --project-ref pobbqgnckilmqmrpiaod",
     "deploy:functions": "npm run deploy:webhook && npm run deploy:gmail",
-    "deploy:webhook": "npx supabase functions deploy telegram-webhook --project-ref pobbqgnckilmqmrpiaod",
-    "deploy:gmail": "npx supabase functions deploy gmail-sync --project-ref pobbqgnckilmqmrpiaod",
-    "deploy:status": "npx supabase functions list --project-ref pobbqgnckilmqmrpiaod",
+    "deploy:webhook": "SSL_CERT_FILE=\"$HOME/.supabase/ca-bundle.pem\" npx supabase functions deploy telegram-webhook --project-ref pobbqgnckilmqmrpiaod",
+    "deploy:gmail": "SSL_CERT_FILE=\"$HOME/.supabase/ca-bundle.pem\" npx supabase functions deploy gmail-sync --project-ref pobbqgnckilmqmrpiaod",
+    "deploy:status": "SSL_CERT_FILE=\"$HOME/.supabase/ca-bundle.pem\" npx supabase functions list --project-ref pobbqgnckilmqmrpiaod",
     "migrate:crypto": "node --experimental-strip-types src/scripts/encrypt-legacy-tokens.ts",
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
