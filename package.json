@@ -9,7 +9,7 @@
     "functions:serve": "npx supabase functions serve --env-file supabase/functions/.env",
     "db:reset": "npx supabase db reset",
     "deploy": "npm run deploy:db && npm run deploy:secrets && npm run deploy:functions",
-    "deploy:db": "npx supabase db push",
+    "deploy:db": "SSL_CERT_FILE=\"$HOME/.supabase/ca-bundle.pem\" npx supabase db push",
     "deploy:secrets": "SSL_CERT_FILE=\"$HOME/.supabase/ca-bundle.pem\" npx supabase secrets set --env-file supabase/functions/.env --project-ref pobbqgnckilmqmrpiaod",
     "deploy:functions": "npm run deploy:webhook && npm run deploy:gmail",
     "deploy:webhook": "SSL_CERT_FILE=\"$HOME/.supabase/ca-bundle.pem\" npx supabase functions deploy telegram-webhook --project-ref pobbqgnckilmqmrpiaod",

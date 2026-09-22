@@ -35,6 +35,7 @@ async function ensureBotCommandsRegistered() {
       body: JSON.stringify({
         commands: [
           { command: 'dailylimit', description: 'Batas ideal & sisa limit pengeluaran harian aman' },
+          { command: 'pagi', description: 'Briefing pantauan jatah belanja aman hari ini' },
           { command: 'today', description: 'Total & rincian pengeluaran hari ini' },
           { command: 'budget', description: 'Status limit anggaran bulan ini' },
           { command: 'transaksi', description: 'Riwayat 5 transaksi terakhir' },
@@ -312,6 +313,33 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
         fastTask();
       }
       return c.json({ ok: true, status: 'fast_daily_limit' });
+    }
+
+    // FAST ROUTE 2.9: Direct Morning Briefing (/pagi or /briefing)
+    if (
+      lowerText === '/pagi' ||
+      lowerText === '/briefing' ||
+      lowerText === 'briefing' ||
+      lowerText === 'briefing pagi' ||
+      lowerText === 'pagi'
+    ) {
+      const fastTask = async () => {
+        try {
+          const { formatMorningBriefingMessage } = await import('../../../src/services/morning-briefing.ts');
+          const text = await formatMorningBriefingMessage(user.id, user.first_name || firstName);
+          await sendTelegramMessage(chatId, text);
+        } catch (err) {
+          logger.error('TelegramWebhook', 'Error in fast route morning briefing', err);
+          await sendTelegramMessage(chatId, 'Gagal mengambil ringkasan briefing pagi.');
+        }
+      };
+      if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(fastTask());
+      } else {
+        fastTask();
+      }
+      return c.json({ ok: true, status: 'fast_morning_briefing' });
     }
 
     // FAST ROUTE 3: Direct Recent Transactions from DB without Gemini LLM
@@ -644,6 +672,19 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
   } catch (err) {
     logger.error('TelegramWebhook', 'Critical exception in Telegram Webhook Handler', err);
     return c.json({ ok: false, error: String(err) }, 500);
+  }
+});
+
+// Automated cron endpoint for daily 05:00 WIB morning briefing
+app.all('/telegram-webhook/morning-briefing', async (c) => {
+  logger.info('TelegramWebhook', 'Triggered automated 05:00 WIB morning briefing broadcast');
+  try {
+    const { sendDailyMorningBriefingToAllUsers } = await import('../../../src/services/morning-briefing.ts');
+    const result = await sendDailyMorningBriefingToAllUsers();
+    return c.json({ ok: true, ...result });
+  } catch (err: any) {
+    logger.error('TelegramWebhook', 'Error in automated morning briefing broadcast', err);
+    return c.json({ ok: false, error: err?.message || String(err) }, 500);
   }
 });
 
