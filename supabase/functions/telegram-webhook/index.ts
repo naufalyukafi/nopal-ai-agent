@@ -87,7 +87,7 @@ async function sendChatAction(chatId: number, action: string = 'typing') {
 
   const url = `https://api.telegram.org/bot${botToken}/sendChatAction`;
   try {
-    await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -95,6 +95,10 @@ async function sendChatAction(chatId: number, action: string = 'typing') {
         action,
       }),
     });
+    if (!res.ok) {
+      const txt = await res.text();
+      logger.warn('TelegramWebhook', `sendChatAction failed (${res.status})`, { error: txt, chatId });
+    }
   } catch (err) {
     logger.debug('TelegramWebhook', 'Failed to send chat action to Telegram', { error: String(err) });
   }
@@ -482,6 +486,8 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
     if (quickExpense) {
       const fastTask = async () => {
         try {
+          await sendChatAction(chatId, 'typing');
+
           const { createManualTransaction } = await import('../../../src/db/transactions.db.ts');
           const { getBudgetStatus } = await import('../../../src/db/budgets.db.ts');
 
@@ -528,17 +534,27 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
     }
 
     // 2. Trigger async background processing for AI requests
-    // Fire Telegram typing indicator immediately so user knows bot received their message
-    sendChatAction(chatId, 'typing');
-
     const backgroundTask = async () => {
+      let typingInterval: any;
       try {
+        // Immediately show typing indicator to user
+        await sendChatAction(chatId, 'typing');
+
+        // Keep sending typing action every 4s until Gemini response is ready
+        typingInterval = setInterval(() => {
+          sendChatAction(chatId, 'typing').catch(() => {});
+        }, 4000);
+
         const replyText = await processAgentMessage(user.id, userText);
+
+        if (typingInterval) clearInterval(typingInterval);
+
         await sendTelegramMessage(chatId, replyText);
 
         // Check budget limits and send proactive alert if 80%+ or 100%+ limit reached
         await checkAndSendBudgetAlerts(user.id, chatId);
       } catch (err) {
+        if (typingInterval) clearInterval(typingInterval);
         logger.error('TelegramWebhook', 'Error processing background agent loop', err, { userId: user.id, chatId });
         await sendTelegramMessage(chatId, 'Maaf, terjadi kesalahan saat memproses pesan Anda.');
       }
