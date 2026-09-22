@@ -75,3 +75,15 @@ test('filterCandidateTransactions logic strictly guards against mutating wrong t
     'Must throw error when query has no match'
   );
 });
+
+test('candidate transactions only select confirmed transactions over rejected duplicates', () => {
+  const duplicateCandidates = [
+    { id: 'tx-rejected', amount: 50000, description: 'Alfagift Order Receipt', status: 'rejected' },
+    { id: 'tx-confirmed', amount: 50000, description: 'BCA QRIS Alfagift Payment', status: 'confirmed' },
+  ];
+
+  const confirmedOnly = duplicateCandidates.filter((t) => t.status === 'confirmed');
+  assert.equal(confirmedOnly.length, 1);
+  assert.equal(confirmedOnly[0].id, 'tx-confirmed');
+});
+

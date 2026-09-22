@@ -80,12 +80,13 @@ export async function getOrCreateCategoryByName(userId: string, categoryName: st
   const supabase = getSupabaseClient();
   const trimmed = categoryName.trim();
 
-  // 1. Exact match check (scoped by user_id to prevent multi-tenant leaks)
+  // 1. Exact match check (scoped by user_id OR default system category where user_id IS NULL)
   const { data: exactCat } = await supabase
     .from('categories')
-    .select('id')
-    .eq('user_id', userId)
+    .select('id, user_id')
+    .or(`user_id.eq.${userId},user_id.is.null`)
     .ilike('name', trimmed)
+    .order('user_id', { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
 
@@ -93,12 +94,13 @@ export async function getOrCreateCategoryByName(userId: string, categoryName: st
     return exactCat.id;
   }
 
-  // 2. Partial match check (scoped by user_id)
+  // 2. Partial match check (scoped by user_id OR default system category where user_id IS NULL)
   const { data: partialCat } = await supabase
     .from('categories')
-    .select('id')
-    .eq('user_id', userId)
+    .select('id, user_id')
+    .or(`user_id.eq.${userId},user_id.is.null`)
     .ilike('name', `%${trimmed}%`)
+    .order('user_id', { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
 
@@ -241,6 +243,7 @@ export async function getBudgetStatus(
   }
 
   const categoryMap = new Map<string, { categoryId: string; categoryName: string; limitAmount: number; spentAmount: number }>();
+  const nameToCatIdKey = new Map<string, string>();
 
   // Add configured budgets
   for (const b of activeBudgets) {
@@ -257,17 +260,28 @@ export async function getBudgetStatus(
       limitAmount: limit,
       spentAmount: spent,
     });
+    nameToCatIdKey.set(catName.trim().toLowerCase(), catId);
   }
 
-  // Add categories that have spending even if no budget limit was set
+  // Add categories that have spending even if no budget limit was set,
+  // or merge if a category with the same normalized name already exists
   for (const [catId, data] of Object.entries(spentByCategoryId)) {
-    if (!categoryMap.has(catId)) {
+    const normName = data.name.trim().toLowerCase();
+    const existingKey = nameToCatIdKey.get(normName);
+    const spent = Math.round(data.amountCents) / 100;
+
+    if (existingKey && existingKey !== catId) {
+      // Merge spending into existing budgeted category with the same name
+      const existing = categoryMap.get(existingKey)!;
+      existing.spentAmount = Math.round((existing.spentAmount + spent) * 100) / 100;
+    } else if (!categoryMap.has(catId)) {
       categoryMap.set(catId, {
         categoryId: catId,
         categoryName: data.name,
         limitAmount: 0,
-        spentAmount: Math.round(data.amountCents) / 100,
+        spentAmount: spent,
       });
+      nameToCatIdKey.set(normName, catId);
     }
   }
 

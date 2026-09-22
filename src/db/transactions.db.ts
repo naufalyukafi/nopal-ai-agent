@@ -224,11 +224,12 @@ export async function updateTransactionCategory(params: {
   // 1. Find or create target category
   const categoryId = await getOrCreateCategoryByName(params.userId, params.newCategoryName);
 
-  // 2. Fetch recent transactions for this user (up to 50) to find exact match
+  // 2. Fetch recent confirmed transactions for this user (up to 50) to find exact match
   const { data: txs, error: fetchError } = await supabase
     .from('transactions')
     .select('*, categories(name)')
     .eq('user_id', params.userId)
+    .eq('status', 'confirmed')
     .order('transaction_date', { ascending: false })
     .limit(50);
 
