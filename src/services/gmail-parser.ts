@@ -3,6 +3,7 @@ import { env } from '../config/env.ts';
 import { getSupabaseClient } from '../db/supabase.ts';
 import { logger } from '../utils/logger.ts';
 import { getOrCreateCategoryByName } from '../db/budgets.db.ts';
+import { sanitizeDescription } from '../utils/sanitize.ts';
 
 export interface ExtractedEmailReceipt {
   isReceipt: boolean;
@@ -98,9 +99,9 @@ EXTRACTION RULES:
 1. "isReceipt": Set to true ONLY if this email confirms an OUTGOING EXPENSE / PAYMENT / PURCHASE / OUTGOING TRANSFER (uang keluar/pengeluaran/pembayaran/pembelian). Set to false if this is an INCOMING TRANSACTION, INCOME, MUTUAL FUND REDEMPTION (pencairan reksa dana/investasi/uang masuk), deposit, refund, promo, or non-expense notification.
 2. "amount": Parse the actual numeric transaction amount (e.g., 20.00 for $20 USD, 15000 for Rp 15.000). DO NOT use subject emoji numbers (like "1💸" or "1").
 3. "currency": Extracted currency ISO code: "IDR", "USD", or "EUR". Defaults to "IDR".
-4. "merchantName": Extract the payee / merchant / recipient name (e.g. "HC BRAVO BOJONEGORO", "OpenAI / ChatGPT", "GitHub").
-5. "categoryName": Categorize into an appropriate category. ${catPromptList}
-6. "description": A short clean summary (e.g., "Pembayaran ke HC BRAVO BOJONEGORO").
+4. "merchantName": Extract the clean payee / merchant / recipient name (e.g. "Alfagift", "HC BRAVO BOJONEGORO", "OpenAI / ChatGPT", "GitHub"). DO NOT include raw transaction IDs, serial numbers, or long series of zeroes.
+5. "categoryName": Categorize into an appropriate category. ${catPromptList} Note: Merchants like "Alfagift", "Indomaret", "Alfamart", "Superindo", "Hypermart" MUST be categorized as "Belanja" or "Makanan & Minuman" (NOT "Lain-lain").
+6. "description": A short clean summary (e.g., "Alfagift", "Belanja Alfagift"). NEVER include reference numbers, long series of zeroes, or raw system tokens.
 `;
 
   let lastError: any;
@@ -147,12 +148,28 @@ EXTRACTION RULES:
         desc = `${desc} (€${rawAmount} EUR)`;
       }
 
+      let cleanMerchant = sanitizeDescription(parsed.merchantName || 'Merchant');
+      let cleanDesc = sanitizeDescription(desc);
+
+      // Smart category post-processing fallback if Gemini returned 'Lain-lain' or blank
+      let categoryName = parsed.categoryName || 'Lain-lain';
+      if (categoryName === 'Lain-lain' || !categoryName) {
+        const combinedText = `${subject} ${cleanDesc} ${cleanMerchant}`.toLowerCase();
+        if (/alfagift|alfamart|indomaret|superindo|hypermart|transmart|sayurbox|shopeefood|gofood|grabfood|kopi|bakmi|resto|cafe|food/i.test(combinedText)) {
+          categoryName = /alfagift|alfamart|indomaret|superindo|hypermart|transmart|sayurbox/i.test(combinedText) ? 'Belanja' : 'Makanan & Minuman';
+        } else if (/gojek|grab|maxim|indrive|m-ticket|kai|kereta|bluebird|garuda|lion|tiket/i.test(combinedText)) {
+          categoryName = 'Transportasi';
+        } else if (/pln|pdam|indihome|biznet|telkomsel|xl|isat|tri|tokopedia billing|lazada bill/i.test(combinedText)) {
+          categoryName = 'Tagihan & Utilitas';
+        }
+      }
+
       const result: ExtractedEmailReceipt = {
         isReceipt: Boolean(parsed.isReceipt),
         amount: idrAmount,
-        merchantName: parsed.merchantName || 'Merchant',
-        categoryName: parsed.categoryName || 'Lain-lain',
-        description: desc,
+        merchantName: cleanMerchant,
+        categoryName: categoryName,
+        description: cleanDesc,
       };
 
       logger.info('GmailParser', `Email parsed successfully via Gemini Structured Output`, {
@@ -194,6 +211,7 @@ export async function createPendingEmailTransaction(params: {
   // Find or create category ID
   const categoryId = await getOrCreateCategoryByName(params.userId, params.categoryName);
   const txDate = params.transactionDate || new Date().toISOString();
+  const cleanDescription = sanitizeDescription(params.description);
 
   const { data: tx, error } = await supabase
     .from('transactions')
@@ -201,7 +219,7 @@ export async function createPendingEmailTransaction(params: {
       user_id: params.userId,
       amount: params.amount,
       category_id: categoryId,
-      description: params.description,
+      description: cleanDescription,
       source: 'gmail',
       status: 'pending_confirmation', // Human in the loop requirement
       gmail_message_id: params.gmailMessageId,

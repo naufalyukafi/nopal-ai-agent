@@ -1,6 +1,7 @@
 import { env } from '../config/env.ts';
 import { confirmTransaction, rejectTransaction, confirmAllPendingTransactions } from '../db/transactions.db.ts';
 import { getOrCreateUserByTelegramId } from '../db/users.db.ts';
+import { sanitizeDescription } from '../utils/sanitize.ts';
 
 export async function sendTelegramConfirmationNotification(
   chatId: number,
@@ -15,13 +16,14 @@ export async function sendTelegramConfirmationNotification(
   const botToken = env.TELEGRAM_BOT_TOKEN;
   if (!botToken) return;
 
+  const cleanDesc = sanitizeDescription(transaction.description);
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   const text = `
 *Deteksi Transaksi Email Baru*
 
 Nominal: *Rp ${transaction.amount.toLocaleString('id-ID')}*
 Kategori: *${transaction.categoryName || 'Belanja'}*
-Deskripsi: _${transaction.description || 'Transaksi Email'}_
+Deskripsi: _${cleanDesc}_
 
 Apakah transaksi ini sesuai untuk dicatat?
 `;
@@ -29,11 +31,11 @@ Apakah transaksi ini sesuai untuk dicatat?
   const inlineKeyboard = {
     inline_keyboard: [
       [
-        { text: 'Konfirmasi', callback_data: `confirm_tx_${transaction.id}` },
-        { text: 'Bukan Transaksi', callback_data: `reject_tx_${transaction.id}` },
+        { text: '✅ Konfirmasi', callback_data: `confirm_tx_${transaction.id}` },
+        { text: '❌ Bukan Transaksi', callback_data: `reject_tx_${transaction.id}` },
       ],
       [
-        { text: 'Konfirmasi Semua Pending', callback_data: 'confirm_all_pending' },
+        { text: '⚡ Konfirmasi Semua Pending', callback_data: 'confirm_all_pending' },
       ],
     ],
   };
@@ -86,7 +88,7 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
           body: JSON.stringify({
             chat_id: chatId,
             message_id: messageId,
-            text: `*Transaksi Terkonfirmasi*\nNominal: Rp ${Number(tx.amount).toLocaleString('id-ID')}\nDeskripsi: ${tx.description || '-'}`,
+            text: `*Transaksi Terkonfirmasi*\nNominal: Rp ${Number(tx.amount).toLocaleString('id-ID')}\nDeskripsi: ${sanitizeDescription(tx.description)}`,
             parse_mode: 'Markdown',
           }),
         });
@@ -116,6 +118,12 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
             }
           }
 
+          const cancelKeyboard = {
+            inline_keyboard: [
+              [{ text: '🗑️ Batalkan Transaksi Ini', callback_data: `delete_tx_${tx.id}` }],
+            ],
+          };
+
           await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -123,6 +131,7 @@ export async function handleTelegramCallbackQuery(callbackQuery: any) {
               chat_id: chatId,
               text: msg,
               parse_mode: 'Markdown',
+              reply_markup: cancelKeyboard,
             }),
           });
 
