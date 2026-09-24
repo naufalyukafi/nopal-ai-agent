@@ -9,6 +9,13 @@ function getApiKeys(): string[] {
   return raw.split(',').map((k) => k.trim()).filter(Boolean);
 }
 
+function maskApiKey(key?: string): string {
+  if (!key) return 'key_unknown';
+  const trimmed = key.trim();
+  if (trimmed.length <= 11) return 'key_***';
+  return `${trimmed.slice(0, 7)}...${trimmed.slice(-4)}`;
+}
+
 async function generateContentWithFallback(
   primaryModel: string,
   contents: any[],
@@ -44,7 +51,8 @@ async function generateContentWithFallback(
         });
 
         const latencyMs = Date.now() - startTime;
-        logger.info('Agent', `Gemini API execution succeeded`, { modelUsed: model, latencyMs, keyIndex: keyIdx });
+        const keyHint = maskApiKey(apiKey);
+        logger.info('Agent', `Gemini API execution succeeded`, { modelUsed: model, latencyMs, keyIndex: keyIdx, keyHint });
 
         // Persist detailed audit log event to Supabase DB
         if (userId) {
@@ -59,6 +67,7 @@ async function generateContentWithFallback(
               latency_ms: latencyMs,
               primary_model_configured: primaryModel,
               key_index: keyIdx,
+              key_hint: keyHint,
             },
           }).catch(() => {});
         }

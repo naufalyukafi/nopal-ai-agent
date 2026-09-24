@@ -174,6 +174,8 @@ EXTRACTION RULES:
         category: result.categoryName,
       });
 
+      const keyHint = apiKey ? `${apiKey.slice(0, 7)}...${apiKey.slice(-4)}` : 'key_***';
+
       const { logAuditEvent } = await import('../db/audit.db.ts');
       logAuditEvent({
         actor: 'system',
@@ -181,6 +183,7 @@ EXTRACTION RULES:
         resourceType: 'gmail_parser',
         details: {
           model_used: modelName,
+          key_hint: keyHint,
           is_receipt: result.isReceipt,
           amount: result.amount,
           merchant: result.merchantName,
