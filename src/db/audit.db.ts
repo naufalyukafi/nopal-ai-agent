@@ -2,6 +2,7 @@ import { logger } from '../utils/logger.ts';
 
 export interface AuditLogEntry {
   userId?: string;
+  actor?: 'user' | 'agent' | 'system';
   action: string;
   resourceType: string;
   resourceId?: string;
