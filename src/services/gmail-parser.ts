@@ -38,31 +38,25 @@ export function stripHtmlToPlainText(html: string): string {
  */
 export function isLikelyFinancialEmail(subject: string, snippet: string, bodyText: string): boolean {
   const cleanSubject = (subject || '').toLowerCase();
-  const combined = `${cleanSubject} ${(snippet || '').toLowerCase()} ${(bodyText || '').slice(0, 1000).toLowerCase()}`;
+  const cleanSnippet = (snippet || '').toLowerCase();
+  const combined = `${cleanSubject} ${cleanSnippet} ${(bodyText || '').slice(0, 1500).toLowerCase()}`;
 
-  // Direct skip obvious non-financial noise
-  if (
-    /unsubscribe|newsletter|berlangganan|lowongan|job alert|security alert|login baru|kode otp|verifikasi akun/i.test(cleanSubject) &&
-    !/pembayaran|berhasil|transaksi|sukses|receipt|invoice|struk|qris/i.test(cleanSubject)
-  ) {
+  // 1. Skip obvious non-financial noise (OTP, login alerts, newsletters) ONLY if no financial terms or amounts present
+  const isObviousNoise = /unsubscribe|newsletter|berlangganan|lowongan|job alert|security alert|login baru|kode otp|verifikasi akun|reset password|verification code/i.test(cleanSubject);
+  const hasFinancialSignal = /rp\s*[\d.,]+|idr\s*[\d.,]+|\$\s*[\d.]+|€\s*[\d.]+|pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|struk|order|pesanan|qris|transfer|billing|payment|purchase|paid|kuitansi|pembelian/i.test(combined);
+
+  if (isObviousNoise && !hasFinancialSignal) {
     return false;
   }
 
-  // Strong transaction indicators in subject line (almost certainly a transaction)
-  if (/pembayaran|membayar|bayar|dibayar|transaksi|berhasil|receipt|invoice|kuitansi|struk|pesanan|order|qris|tagihan|billing|pembelian|lunas|terbayar|bukti|payment|paid|purchase/i.test(cleanSubject)) {
+  // 2. If email contains any currency number or transaction signal, process it!
+  if (hasFinancialSignal) {
     return true;
   }
 
-  // Body and snippet financial indicators
-  const indicators = [
-    /pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|kuitansi|struk|order|pesanan|terbayar|lunas|debet|debit|qris|transfer|pembelian|bukti|payment|paid|purchase/i,
-    /total bayar|total pembayaran|jumlah pembayaran|total harga|subtotal|amount paid|grand total/i,
-    /rp\s*[\d.,]+|idr\s*[\d.,]+|\$\s*[\d.]+/i,
-    /bca|mandiri|bni|bri|cimb|jago|jenius|gopay|ovo|dana|shopeepay|alfagift|indomaret|tokopedia|grab|gojek|shopee/i,
-  ];
-
-  const matchedCount = indicators.filter((pattern) => pattern.test(combined)).length;
-  return matchedCount >= 2;
+  // 3. Fallback: Check for known financial entities / banks / payment gateways / e-commerce
+  const financialEntities = /bca|mandiri|bni|bri|cimb|danamon|permata|jago|jenius|blu|seabank|ocbc|dbs|gopay|ovo|dana|shopeepay|shopee|tokopedia|grab|gojek|alfagift|indomaret|alfamart|superindo|paypal|stripe|apple|google play|steam/i;
+  return financialEntities.test(combined);
 }
 
 export async function parseEmailContentWithGemini(

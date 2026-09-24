@@ -207,14 +207,13 @@ export async function syncGmailMessagesForUser(
     try {
       const accessToken = await getAccessTokenFromRefreshToken(account.refresh_token);
 
-      // Delta sync cursor: filter financial receipts directly in Gmail search to keep the batch focused
-      const financialKeywords = '(pembayaran OR membayar OR bayar OR dibayar OR transaksi OR transfer OR debet OR debit OR qris OR struk OR receipt OR invoice OR order OR tagihan OR pembelian OR lunas OR terbayar OR bukti OR kuitansi OR payment OR paid OR purchase)';
-      let queryParam = `newer_than:7d ${financialKeywords}`;
+      // Delta sync cursor: query by timestamp window directly so no bank/app email is missed at Gmail API search level
+      let queryParam = 'newer_than:7d';
       if (account.last_synced_message_timestamp) {
         const lastSyncTime = new Date(account.last_synced_message_timestamp).getTime();
         // Add 5-minute safety buffer for clock skew
         const afterUnix = Math.max(0, Math.floor((lastSyncTime - 5 * 60 * 1000) / 1000));
-        queryParam = `after:${afterUnix} ${financialKeywords}`;
+        queryParam = `after:${afterUnix}`;
       }
 
       // Search messages using timestamp cursor (limit to 25 to cover busy inbox batches)
