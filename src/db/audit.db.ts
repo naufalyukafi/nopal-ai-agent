@@ -17,29 +17,27 @@ export interface AuditLogEntry {
  * To enable full DB audit persistence in the future, uncomment the Supabase `.from('audit_logs').insert(...)` call.
  */
 export async function logAuditEvent(params: AuditLogEntry): Promise<void> {
-  // Stream to console/cloud structured log explorer without adding DB write latency
-  logger.debug('AuditLog', `Audit event: ${params.action}`, {
+  logger.info('AuditLog', `Audit event: ${params.action}`, {
     userId: params.userId,
     entity: params.resourceType,
     resourceId: params.resourceId,
     details: params.details,
   });
 
-  /* UNCOMMENT TO PERSIST AUDIT LOGS TO SUPABASE POSTGRES DB:
   try {
     const { getSupabaseClient } = await import('./supabase.ts');
     const supabase = getSupabaseClient();
     await supabase.from('audit_logs').insert({
-      user_id: params.userId,
-      actor: params.userId ? 'user' : 'system',
-      entity: params.resourceType || 'transaction',
+      user_id: params.userId || null,
+      actor: params.actor || (params.userId ? 'user' : 'system'),
+      entity: params.resourceType || 'system',
       action: params.action,
-      resource_type: params.resourceType,
-      resource_id: params.resourceId,
-      details: params.details || {},
+      payload: {
+        resource_id: params.resourceId,
+        ...(params.details || {}),
+      },
     });
   } catch (err) {
     logger.warn('AuditLog', 'Failed DB audit insert', { error: String(err) });
   }
-  */
 }

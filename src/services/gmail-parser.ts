@@ -174,6 +174,20 @@ EXTRACTION RULES:
         category: result.categoryName,
       });
 
+      const { logAuditEvent } = await import('../db/audit.db.ts');
+      logAuditEvent({
+        actor: 'system',
+        action: 'GMAIL_PARSER_INVOCATION',
+        resourceType: 'gmail_parser',
+        details: {
+          model_used: modelName,
+          is_receipt: result.isReceipt,
+          amount: result.amount,
+          merchant: result.merchantName,
+          category: result.categoryName,
+        },
+      }).catch(() => {});
+
       return result;
     } catch (err: any) {
       lastError = err;

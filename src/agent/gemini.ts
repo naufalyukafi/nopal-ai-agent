@@ -12,14 +12,15 @@ function getApiKeys(): string[] {
 async function generateContentWithFallback(
   primaryModel: string,
   contents: any[],
-  config: any
+  config: any,
+  userId?: string
 ) {
   const keys = getApiKeys();
   if (keys.length === 0) {
     throw new Error('GEMINI_API_KEY is not configured.');
   }
 
-  // Only valid 15 RPM models. Primary: gemini-3.5-flash-lite, Fallback: gemini-3.6-flash
+  // Primary: gemini-3.5-flash-lite, Fallback: gemini-3.6-flash
   const fallbackModels = [
     primaryModel || 'gemini-3.5-flash-lite',
     'gemini-3.5-flash-lite',
@@ -29,16 +30,40 @@ async function generateContentWithFallback(
 
   let lastError: any;
 
-  // Inverted loop: Try all API keys on the fastest model FIRST before falling back to heavier models
   for (const model of modelsToTry) {
+    let keyIdx = 0;
     for (const apiKey of keys) {
+      keyIdx++;
+      const startTime = Date.now();
       try {
         const ai = new GoogleGenAI({ apiKey });
-        return await ai.models.generateContent({
+        const response = await ai.models.generateContent({
           model,
           contents,
           config,
         });
+
+        const latencyMs = Date.now() - startTime;
+        logger.info('Agent', `Gemini API execution succeeded`, { modelUsed: model, latencyMs, keyIndex: keyIdx });
+
+        // Persist detailed audit log event to Supabase DB
+        if (userId) {
+          const { logAuditEvent } = await import('../db/audit.db.ts');
+          logAuditEvent({
+            userId,
+            actor: 'agent',
+            action: 'AI_AGENT_INVOCATION',
+            resourceType: 'gemini_model',
+            details: {
+              model_used: model,
+              latency_ms: latencyMs,
+              primary_model_configured: primaryModel,
+              key_index: keyIdx,
+            },
+          }).catch(() => {});
+        }
+
+        return response;
       } catch (err: any) {
         lastError = err;
         const errMsg = String(err?.message || err);
@@ -175,7 +200,8 @@ STRICT GUARDRAILS & PROMPT INJECTION PROTECTION:
         {
           systemInstruction,
           tools: [{ functionDeclarations: declarations as any }],
-        }
+        },
+        userId
       );
 
       const candidateContent = response.candidates?.[0]?.content;
