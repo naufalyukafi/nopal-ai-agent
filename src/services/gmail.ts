@@ -208,7 +208,7 @@ export async function syncGmailMessagesForUser(
       const accessToken = await getAccessTokenFromRefreshToken(account.refresh_token);
 
       // Delta sync cursor: filter financial receipts directly in Gmail search to keep the batch focused
-      const financialKeywords = '(pembayaran OR transaksi OR transfer OR debet OR debit OR qris OR struk OR receipt OR invoice OR order OR tagihan OR pembelian OR lunas OR terbayar OR bukti OR kuitansi OR payment OR purchase)';
+      const financialKeywords = '(pembayaran OR membayar OR bayar OR dibayar OR transaksi OR transfer OR debet OR debit OR qris OR struk OR receipt OR invoice OR order OR tagihan OR pembelian OR lunas OR terbayar OR bukti OR kuitansi OR payment OR paid OR purchase)';
       let queryParam = `newer_than:7d ${financialKeywords}`;
       if (account.last_synced_message_timestamp) {
         const lastSyncTime = new Date(account.last_synced_message_timestamp).getTime();
