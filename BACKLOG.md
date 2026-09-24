@@ -73,13 +73,50 @@ Dashboard visual (grafik batang, pie chart, line chart tren cashflow) **memerluk
 
 ---
 
+### 3. 📸 Multi-Bank & Physical Receipt OCR Scanning (Foto Struk Telegram)
+* **Status:** 🟡 `Backlog / On-Hold`
+* **Estimasi Eksekusi:** **2–3 Bulan ke Depan**
+* **Prioritas:** Low - Medium (Convenience)
+* **Kompleksitas:** Sedang
+
+#### 💡 Rencana Spesifikasi:
+1. **Camera Ingestion:** Pengguna dapat memfoto struk belanja fisik (Indomaret, Resto, Parkir, Bensin) lalu mengirimnya langsung ke Bot Telegram.
+2. **Gemini Flash Vision:** Memanfaatkan kapabilitas *multimodal vision* `gemini-3.5-flash-lite` untuk memproses gambar struk, mengekstrak total nominal, merchant, dan mendeteksi kategori secara otomatis (0.8s).
+
+---
+
+### 4. 🔔 Recurring Subscription & Bill Reminder Engine (Pengingat Tagihan Rutin)
+* **Status:** 🟡 `Backlog / On-Hold`
+* **Estimasi Eksekusi:** **1–2 Bulan ke Depan**
+* **Prioritas:** Medium (Prevention)
+* **Kompleksitas:** Rendah - Sedang
+
+#### 💡 Rencana Spesifikasi:
+1. **Automatic Pattern Detection:** Agen secara otomatis mendeteksi transaksi rutin bulanan (seperti IndiHome, Netflix, Spotify, Listrik PLN, Kos, Asuransi).
+2. **Proactive Reminder:** Mengirim notifikasi H-3 sebelum tanggal gajian / jatuh tempo tagihan di Telegram agar jatah anggaran tidak terpakai secara tidak sengaja.
+
+---
+
+### 5. 📑 Monthly Financial Statement & Data Export (CSV / PDF)
+* **Status:** 🟡 `Backlog / On-Hold`
+* **Estimasi Eksekusi:** **1 Bulan ke Depan**
+* **Prioritas:** Medium (Utility)
+* **Kompleksitas:** Rendah
+
+#### 💡 Rencana Spesifikasi:
+1. **Command `/export`:** Mengirimkan file CSV / PDF laporan keuangan bulanan langsung di chat Telegram untuk arsip pribadi atau pembukuan tahunan.
+
+---
+
 ## 📋 Matriks Prioritas Backlog
 
 | Item | Kategori | Syarat Mulai (*Prerequisites*) | Estimasi Waktu | Cost Impact |
 | :--- | :--- | :--- | :--- | :--- |
 | **Financial Literacy Digest** | Retention & Mindset | Habit pencatatan harian aktif & stabil 3–4 minggu berturut-turut | 1–2 Bulan | Sangat Rendah (RSS + Gemini Flash free tier) |
+| **Recurring Bill Reminders** | Automation & Prevention | Memiliki data histori transaksi 1–2 bulan | 1–2 Bulan | Sangat Rendah (Crons internal) |
+| **Data Export (CSV/PDF)** | Utility & Archiving | Data transaksi tercatat beberapa minggu | 1 Bulan | Nol (Pure local generator) |
+| **OCR Receipt Scanning** | Ingestion Engine | Kebutuhan catat struk fisik via foto Telegram | 2–3 Bulan | Rendah (Gemini Flash Vision) |
 | **HTML / Web Dashboard** | Reporting & UI | Minimal 2–3 siklus gajian (~60–90 hari transaksi) tercatat di database | 2–4 Bulan | Sangat Rendah (Static hosting + Supabase) |
-| **Multi-Bank OCR Receipt Scanning** | Ingestion Engine | Jika ada kebutuhan catat struk fisik via foto kamera Telegram | TBD | Rendah (Gemini Flash Vision) |
 
 ---
 
