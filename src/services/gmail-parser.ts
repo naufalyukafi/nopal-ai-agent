@@ -41,22 +41,25 @@ export function isLikelyFinancialEmail(subject: string, snippet: string, bodyTex
   const cleanSnippet = (snippet || '').toLowerCase();
   const combined = `${cleanSubject} ${cleanSnippet} ${(bodyText || '').slice(0, 1500).toLowerCase()}`;
 
-  // 1. Skip obvious non-financial noise (OTP, login alerts, newsletters) ONLY if no financial terms or amounts present
-  const isObviousNoise = /unsubscribe|newsletter|berlangganan|lowongan|job alert|security alert|login baru|kode otp|verifikasi akun|reset password|verification code/i.test(cleanSubject);
-  const hasFinancialSignal = /rp\s*[\d.,]+|idr\s*[\d.,]+|\$\s*[\d.]+|€\s*[\d.]+|pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|struk|order|pesanan|qris|transfer|billing|payment|purchase|paid|kuitansi|pembelian/i.test(combined);
+  // 1. Skip obvious non-financial noise & promo marketing newsletters WITHOUT explicit receipt signals
+  const isObviousNoise = /unsubscribe|newsletter|berlangganan|lowongan|job alert|security alert|login baru|kode otp|verifikasi akun|reset password|verification code|promo|cashback|diskon|voucher|penawaran|syarat & ketentuan|klaim/i.test(cleanSubject);
+  const hasStrongReceiptSignal = /berhasil|sukses|dibayar|pembayaran sebesar|total bayar|rincian transaksi|rincian pembayaran|kuitansi|struk|order #|pesanan #|bukti transfer|bukti pembayaran/i.test(combined);
 
-  if (isObviousNoise && !hasFinancialSignal) {
+  if (isObviousNoise && !hasStrongReceiptSignal) {
     return false;
   }
 
-  // 2. If email contains any currency number or transaction signal, process it!
-  if (hasFinancialSignal) {
+  // 2. Must contain an actual currency amount (e.g. Rp 10.000 or IDR 50,000 or $15) or payment terms
+  const hasCurrencyPattern = /rp\s*[\d.,]{2,}|idr\s*[\d.,]{2,}|\$\s*[\d.]+|€\s*[\d.]+/i.test(combined);
+  const hasFinancialSignal = /pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|struk|order|pesanan|qris|transfer|billing|payment|purchase|paid|kuitansi|pembelian/i.test(combined);
+
+  if (hasCurrencyPattern && (hasFinancialSignal || hasStrongReceiptSignal)) {
     return true;
   }
 
-  // 3. Fallback: Check for known financial entities / banks / payment gateways / e-commerce
+  // 3. Fallback: Check for known financial entities with currency numbers
   const financialEntities = /bca|mandiri|bni|bri|cimb|danamon|permata|jago|jenius|blu|seabank|ocbc|dbs|gopay|ovo|dana|shopeepay|shopee|tokopedia|grab|gojek|alfagift|indomaret|alfamart|superindo|paypal|stripe|apple|google play|steam/i;
-  return financialEntities.test(combined);
+  return financialEntities.test(combined) && hasCurrencyPattern;
 }
 
 export async function parseEmailContentWithGemini(
