@@ -19,11 +19,11 @@ async function generateContentWithFallback(
     throw new Error('GEMINI_API_KEY is not configured.');
   }
 
-  // Only fast, low-latency 15 RPM models. Avoid heavy reasoning models (gemini-3.7/3.6) that add 5-10s latency
+  // Only valid 15 RPM models. Primary: gemini-3.5-flash-lite, Fallback: gemini-3.6-flash
   const fallbackModels = [
-    primaryModel,
+    primaryModel || 'gemini-3.5-flash-lite',
     'gemini-3.5-flash-lite',
-    'gemini-3.5-flash',
+    'gemini-3.6-flash',
   ];
   const modelsToTry = Array.from(new Set(fallbackModels));
 
