@@ -208,7 +208,7 @@ export async function syncGmailMessagesForUser(
       const accessToken = await getAccessTokenFromRefreshToken(account.refresh_token);
 
       // Delta sync cursor: filter financial receipts directly in Gmail search to keep the batch focused
-      const financialKeywords = '(pembayaran OR transaksi OR transfer OR debet OR debit OR qris OR struk OR receipt OR invoice OR order OR tagihan)';
+      const financialKeywords = '(pembayaran OR transaksi OR transfer OR debet OR debit OR qris OR struk OR receipt OR invoice OR order OR tagihan OR pembelian OR lunas OR terbayar OR bukti OR kuitansi OR payment OR purchase)';
       let queryParam = `newer_than:7d ${financialKeywords}`;
       if (account.last_synced_message_timestamp) {
         const lastSyncTime = new Date(account.last_synced_message_timestamp).getTime();
@@ -217,9 +217,9 @@ export async function syncGmailMessagesForUser(
         queryParam = `after:${afterUnix} ${financialKeywords}`;
       }
 
-      // Search messages using timestamp cursor (limit to 10 to keep batch light)
+      // Search messages using timestamp cursor (limit to 25 to cover busy inbox batches)
       const listRes = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(queryParam)}&maxResults=10`,
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(queryParam)}&maxResults=25`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
 

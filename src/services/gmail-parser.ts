@@ -49,13 +49,13 @@ export function isLikelyFinancialEmail(subject: string, snippet: string, bodyTex
   }
 
   // Strong transaction indicators in subject line (almost certainly a transaction)
-  if (/pembayaran|transaksi|berhasil|receipt|invoice|kuitansi|struk|pesanan|order|qris|tagihan|billing/i.test(cleanSubject)) {
+  if (/pembayaran|transaksi|berhasil|receipt|invoice|kuitansi|struk|pesanan|order|qris|tagihan|billing|pembelian|lunas|terbayar|bukti|payment|purchase/i.test(cleanSubject)) {
     return true;
   }
 
   // Body and snippet financial indicators
   const indicators = [
-    /pembayaran|transaksi|receipt|invoice|kuitansi|struk|order|pesanan|terbayar|lunas|debet|debit|qris|transfer/i,
+    /pembayaran|transaksi|receipt|invoice|kuitansi|struk|order|pesanan|terbayar|lunas|debet|debit|qris|transfer|pembelian|bukti|payment|purchase/i,
     /total bayar|total pembayaran|jumlah pembayaran|total harga|subtotal|amount paid|grand total/i,
     /rp\s*[\d.,]+|idr\s*[\d.,]+|\$\s*[\d.]+/i,
     /bca|mandiri|bni|bri|cimb|jago|jenius|gopay|ovo|dana|shopeepay|alfagift|indomaret|tokopedia|grab|gojek|shopee/i,
