@@ -22,16 +22,18 @@ export async function formatMorningBriefingMessage(userId: string, firstName?: s
 
   let text = `🌅 *Selamat Pagi${greetingName}!* — Pantauan Keuangan Hari Ini\n_${dateStr}_\n\n`;
 
-  if (daily.recommendedDailyLimit > 0) {
-    text += `• *Jatah Belanja Aman Hari Ini:* Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}\n`;
+  if (daily.totalMonthlyBudget > 0) {
+    text += `• *Jatah Belanja Aman Hari Ini:* Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}${daily.recommendedDailyLimit === 0 ? ' _(Limit terpakai penuh)_' : ''}\n`;
     text += `• *Sisa Budget Bulan Ini:* Rp ${daily.remainingMonthlyBudget.toLocaleString('id-ID')}\n`;
     text += `• *Sisa Waktu Siklus:* ${daily.remainingDays} hari (s/d ${daily.salaryCycleEnd})\n`;
     text += `• *Status Keuangan:* ${statusDesc} ${statusIcon}\n\n`;
 
-    if (daily.status === 'WARNING' || daily.status === 'OVER_LIMIT') {
-      text += `💡 _Tips: Pengeluaran beberapa hari terakhir agak tinggi. Prioritaskan kebutuhan pokok hari ini agar tabungan tetap aman!_\n\n`;
+    if (daily.status === 'OVER_LIMIT') {
+      text += `💡 _Tips Pemulihan: Anggaran operasional bulan ini telah terpakai penuh. Tetap semangat! Batasi pengeluaran hanya untuk kebutuhan super esensial sampai siklus gajian berikutnya tiba. 🛡️_\n\n`;
+    } else if (daily.status === 'WARNING') {
+      text += `💡 _Tips Waspada: Pengeluaran beberapa hari terakhir agak tinggi. Prioritaskan kebutuhan pokok hari ini agar tabungan tetap aman! ⚖️_\n\n`;
     } else {
-      text += `💡 _Tips: Catat pengeluaran langsung saat belanja (contoh: \`kopi 25k\`) agar anggaran tetap rapi._\n\n`;
+      text += `💡 _Tips: Keuanganmu berjalan sangat baik hari ini! Catat pengeluaran langsung saat belanja (contoh: \`kopi 25k\`) agar anggaran tetap rapi. ✨_\n\n`;
     }
   } else {
     text += `Belum ada batas anggaran bulanan yang diatur.\nSampaikan alokasi gaji Anda (contoh: "Gaji 7.6jt mau tabung 6jt") agar bot dapat menghitung limit harian otomatis.\n\n`;

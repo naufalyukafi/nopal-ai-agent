@@ -239,7 +239,7 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
 
           if (today.count === 0) {
             let msg = `Pengeluaran Hari Ini (${dateStr})\n\nBelum ada pengeluaran yang dicatat untuk hari ini.`;
-            if (daily.recommendedDailyLimit > 0) {
+            if (daily.totalMonthlyBudget > 0) {
               msg += `\n\nBatas Ideal Hari Ini: Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}`;
             }
             await sendTelegramMessage(chatId, msg);
@@ -248,7 +248,7 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
 
           let text = `Pengeluaran Hari Ini (${dateStr})\n\n`;
           text += `• Total Terpakai: Rp ${today.totalSpent.toLocaleString('id-ID')} (${today.count} transaksi)\n`;
-          if (daily.recommendedDailyLimit > 0) {
+          if (daily.totalMonthlyBudget > 0) {
             text += `• Limit Harian (Standar): Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')} / hari\n`;
           }
           text += `\nRincian Transaksi:\n`;
@@ -544,7 +544,7 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
             let dailyNote = '';
             try {
               const daily = await getSmartDailyLimitStatus(user.id);
-              if (daily.recommendedDailyLimit > 0) {
+              if (daily.totalMonthlyBudget > 0) {
                 if (daily.todayRemainingLimit >= 0) {
                   dailyNote = `\n• Sisa Jatah Hari Ini: Rp ${daily.todayRemainingLimit.toLocaleString('id-ID')} (${daily.status === 'SAFE' ? 'Aman' : 'Waspada'})`;
                 } else {
@@ -588,7 +588,7 @@ Silakan gunakan tombol menu di bawah atau sampaikan instruksi Anda.`;
             let dailyNote = '';
             try {
               const daily = await getSmartDailyLimitStatus(user.id);
-              if (daily.recommendedDailyLimit > 0) {
+              if (daily.totalMonthlyBudget > 0) {
                 if (daily.todayRemainingLimit >= 0) {
                   dailyNote = `\n• Sisa Jatah Hari Ini: Rp ${daily.todayRemainingLimit.toLocaleString('id-ID')} (${daily.status === 'SAFE' ? 'Aman' : 'Waspada'})`;
                 } else {
