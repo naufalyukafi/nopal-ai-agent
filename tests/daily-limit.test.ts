@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSmartDailyLimitStatus, isSavingsCategory } from '../src/db/daily-limit.db.ts';
+import { getSmartDailyLimitStatus, isSavingsCategory, isFixedBillCategory } from '../src/db/daily-limit.db.ts';
 
 test('getSmartDailyLimitStatus module function signature exists', () => {
   assert.equal(typeof getSmartDailyLimitStatus, 'function', 'getSmartDailyLimitStatus should be an exported function');
@@ -14,6 +14,16 @@ test('isSavingsCategory correctly identifies savings and investment categories',
   assert.equal(isSavingsCategory('Makanan & Minuman'), false);
   assert.equal(isSavingsCategory('Kost'), false);
   assert.equal(isSavingsCategory('Tagihan & Utilitas'), false);
+});
+
+test('isFixedBillCategory correctly identifies fixed recurring bills', () => {
+  assert.equal(isFixedBillCategory('Internet & Komunikasi'), true);
+  assert.equal(isFixedBillCategory('Paket Data Indosat'), true);
+  assert.equal(isFixedBillCategory('Listrik PLN'), true);
+  assert.equal(isFixedBillCategory('Sewa Kos'), true);
+  assert.equal(isFixedBillCategory('Subscription Netflix'), true);
+  assert.equal(isFixedBillCategory('Makanan & Minuman'), false);
+  assert.equal(isFixedBillCategory('Jajan Kopi'), false);
 });
 
 test('Smart Daily Limit mathematical calculations logic', () => {

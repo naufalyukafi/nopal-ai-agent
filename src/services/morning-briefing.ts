@@ -23,15 +23,19 @@ export async function formatMorningBriefingMessage(userId: string, firstName?: s
   let text = `🌅 *Selamat Pagi${greetingName}!* — Pantauan Keuangan Hari Ini\n_${dateStr}_\n\n`;
 
   if (daily.totalMonthlyBudget > 0) {
-    text += `• *Jatah Belanja Aman Hari Ini:* Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}${daily.recommendedDailyLimit === 0 ? ' _(Limit terpakai penuh)_' : ''}\n`;
+    text += `• *Jatah Belanja Operasional Hari Ini:* Rp ${daily.recommendedDailyLimit.toLocaleString('id-ID')}${daily.recommendedDailyLimit === 0 ? ' _(Limit terpakai penuh)_' : ''}\n`;
+    text += `• *Terpakai Operasional Harian:* Rp ${daily.todaySpent.toLocaleString('id-ID')}\n`;
+    if (daily.todayFixedBillsSpent && daily.todayFixedBillsSpent > 0) {
+      text += `• *Tagihan Rutin Terbayar Hari Ini:* Rp ${daily.todayFixedBillsSpent.toLocaleString('id-ID')} _(Tercakup di Budget Bulanan)_\n`;
+    }
     text += `• *Sisa Budget Bulan Ini:* Rp ${daily.remainingMonthlyBudget.toLocaleString('id-ID')}\n`;
     text += `• *Sisa Waktu Siklus:* ${daily.remainingDays} hari (s/d ${daily.salaryCycleEnd})\n`;
     text += `• *Status Keuangan:* ${statusDesc} ${statusIcon}\n\n`;
 
     if (daily.status === 'OVER_LIMIT') {
-      text += `💡 _Tips Pemulihan: Anggaran operasional bulan ini telah terpakai penuh. Tetap semangat! Batasi pengeluaran hanya untuk kebutuhan super esensial sampai siklus gajian berikutnya tiba. 🛡️_\n\n`;
+      text += `💡 _Tips Pemulihan: Anggaran operasional harian telah terlampaui. Tetap semangat! Batasi pengeluaran hanya untuk kebutuhan esensial hari ini. 🛡️_\n\n`;
     } else if (daily.status === 'WARNING') {
-      text += `💡 _Tips Waspada: Pengeluaran beberapa hari terakhir agak tinggi. Prioritaskan kebutuhan pokok hari ini agar tabungan tetap aman! ⚖️_\n\n`;
+      text += `💡 _Tips Waspada: Pengeluaran operasional hari ini mendekati batas limit. Jaga pola pengeluaran agar tetap aman! ⚖️_\n\n`;
     } else {
       text += `💡 _Tips: Keuanganmu berjalan sangat baik hari ini! Catat pengeluaran langsung saat belanja (contoh: \`kopi 25k\`) agar anggaran tetap rapi. ✨_\n\n`;
     }
@@ -42,6 +46,7 @@ export async function formatMorningBriefingMessage(userId: string, firstName?: s
   text += `Semangat menjalani hari ini! ✨`;
   return text;
 }
+
 
 /**
  * Iterates through all registered Telegram users and sends them the morning briefing.

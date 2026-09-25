@@ -11,6 +11,11 @@ export function isSavingsCategory(catName?: string): boolean {
   return /tabungan|investasi|savings|deposito|dana darurat|reksa dana|portfolio/i.test(catName.trim());
 }
 
+export function isFixedBillCategory(catName?: string): boolean {
+  if (!catName) return false;
+  return /internet|komunikasi|telepon|pulsa|paket data|wifi|indihome|biznet|indosat|telkomsel|xl|tri|smartfren|listrik|pln|air|pdam|sewa|kos|kontrakan|kpr|cicilan|asuransi|bpjs|pajak|subskripsi|subscription|netflix|spotify|youtube/i.test(catName.trim());
+}
+
 export async function getSmartDailyLimitStatus(
   userId: string,
   referenceDate: Date = new Date()
@@ -84,7 +89,28 @@ export async function getSmartDailyLimitStatus(
 
   // 4. Fetch today's confirmed spending summary using WIB boundaries
   const todaySummary = await getTodayTransactionsSummary(userId, referenceDate);
-  const todaySpent = todaySummary.totalSpent;
+  
+  // Separate today's spending into operational vs fixed bills vs savings
+  let todayOperationalCents = 0;
+  let todayFixedBillsCents = 0;
+  let fixedBillsCountToday = 0;
+
+  for (const t of todaySummary.transactions) {
+    const amtCents = Math.round(Number(t.amount || 0) * 100);
+    if (isSavingsCategory(t.categoryName)) {
+      continue;
+    }
+    if (isFixedBillCategory(t.categoryName)) {
+      todayFixedBillsCents += amtCents;
+      fixedBillsCountToday++;
+    } else {
+      todayOperationalCents += amtCents;
+    }
+  }
+
+  const todaySpent = Math.round(todayOperationalCents) / 100;
+  const todayFixedBillsSpent = Math.round(todayFixedBillsCents) / 100;
+  const todayTotalSpentWithBills = Math.round(todayOperationalCents + todayFixedBillsCents) / 100;
 
   // 5. Calculate remaining days & total days in cycle accurately in WIB
   const cycleStart = new Date(cycle.startDate);
@@ -99,6 +125,7 @@ export async function getSmartDailyLimitStatus(
 
   // 6. Calculate realistic daily limit (Baseline vs Dynamic Pace)
   const remainingMonthlyBudget = Math.max(0, totalMonthlyBudget - cycleSpent);
+  // Available budget for remainder excludes operational spent today so today's limit is dynamic
   const availableBudgetForRemainder = Math.max(0, totalMonthlyBudget - (cycleSpent - todaySpent));
 
   const baselineDailyLimit = totalMonthlyBudget > 0 ? Math.floor(totalMonthlyBudget / totalDaysInCycle) : 0;
@@ -108,7 +135,7 @@ export async function getSmartDailyLimitStatus(
   const recommendedDailyLimit = dynamicDailyLimit;
   const todayRemainingLimit = recommendedDailyLimit - todaySpent;
 
-  // 7. Calculate status & clean progress indicator
+  // 7. Calculate status & clean progress indicator based on OPERATIONAL daily spent
   let percentageSpentToday = 0;
   if (recommendedDailyLimit > 0) {
     percentageSpentToday = Math.min(100, Math.round((todaySpent / recommendedDailyLimit) * 100));
@@ -148,5 +175,9 @@ export async function getSmartDailyLimitStatus(
     status,
     progressBar,
     salaryCycleEnd,
+    todayFixedBillsSpent,
+    todayTotalSpentWithBills,
+    fixedBillsCountToday,
   };
 }
+

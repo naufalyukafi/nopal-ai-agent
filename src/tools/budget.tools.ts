@@ -89,9 +89,13 @@ export async function executeBudgetTool(toolName: string, args: Record<string, a
 
   if (toolName === 'get_smart_daily_limit') {
     const dailyStatus = await getSmartDailyLimitStatus(userId);
+    let extraInfo = '';
+    if (dailyStatus.todayFixedBillsSpent && dailyStatus.todayFixedBillsSpent > 0) {
+      extraInfo = ` Transaksi Tagihan Rutin Terbayar Hari Ini: Rp ${dailyStatus.todayFixedBillsSpent.toLocaleString('id-ID')} (tercakup dalam budget bulanan).`;
+    }
     return {
       success: true,
-      message: `Status limit harian berhasil diambil. Batas aman hari ini: Rp ${dailyStatus.recommendedDailyLimit.toLocaleString('id-ID')}, Terpakai: Rp ${dailyStatus.todaySpent.toLocaleString('id-ID')}, Sisa limit harian: Rp ${dailyStatus.todayRemainingLimit.toLocaleString('id-ID')}. Status: ${dailyStatus.status}.`,
+      message: `Status limit harian operasional berhasil diambil. Batas aman hari ini: Rp ${dailyStatus.recommendedDailyLimit.toLocaleString('id-ID')}, Terpakai operasional: Rp ${dailyStatus.todaySpent.toLocaleString('id-ID')}, Sisa limit harian: Rp ${dailyStatus.todayRemainingLimit.toLocaleString('id-ID')}.${extraInfo} Status: ${dailyStatus.status}.`,
       data: dailyStatus,
     };
   }

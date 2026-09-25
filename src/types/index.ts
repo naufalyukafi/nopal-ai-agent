@@ -55,5 +55,9 @@ export interface SmartDailyLimitStatus {
   status: 'SAFE' | 'WARNING' | 'OVER_LIMIT';
   progressBar: string;
   salaryCycleEnd: string;
+  todayFixedBillsSpent?: number;
+  todayTotalSpentWithBills?: number;
+  fixedBillsCountToday?: number;
 }
+
 
