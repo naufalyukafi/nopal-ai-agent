@@ -6,9 +6,12 @@ import { getWIBDate, getDaysInMonth, getWIBMonthPeriod, getWIBMonthRange } from 
 
 const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
 
+import type { CategoryType } from '../types/index.ts';
+
 export interface BudgetCategoryStatus {
   categoryId: string;
   categoryName: string;
+  categoryType?: CategoryType;
   limitAmount: number;
   spentAmount: number;
   remainingAmount: number;
@@ -76,14 +79,18 @@ export function calculateSalaryCycleDateRange(
   }
 }
 
-export async function getOrCreateCategoryByName(userId: string, categoryName: string): Promise<string> {
+export async function getOrCreateCategoryByName(
+  userId: string,
+  categoryName: string,
+  categoryType?: CategoryType
+): Promise<string> {
   const supabase = getSupabaseClient();
   const trimmed = categoryName.trim();
 
   // 1. Exact match check (scoped by user_id OR default system category where user_id IS NULL)
   const { data: exactCat } = await supabase
     .from('categories')
-    .select('id, user_id')
+    .select('id, user_id, type')
     .or(`user_id.eq.${userId},user_id.is.null`)
     .ilike('name', trimmed)
     .order('user_id', { ascending: false, nullsFirst: false })
@@ -91,13 +98,16 @@ export async function getOrCreateCategoryByName(userId: string, categoryName: st
     .maybeSingle();
 
   if (exactCat) {
+    if (categoryType && exactCat.type !== categoryType && exactCat.user_id === userId) {
+      await supabase.from('categories').update({ type: categoryType }).eq('id', exactCat.id);
+    }
     return exactCat.id;
   }
 
   // 2. Partial match check (scoped by user_id OR default system category where user_id IS NULL)
   const { data: partialCat } = await supabase
     .from('categories')
-    .select('id, user_id')
+    .select('id, user_id, type')
     .or(`user_id.eq.${userId},user_id.is.null`)
     .ilike('name', `%${trimmed}%`)
     .order('user_id', { ascending: false, nullsFirst: false })
@@ -105,15 +115,31 @@ export async function getOrCreateCategoryByName(userId: string, categoryName: st
     .maybeSingle();
 
   if (partialCat) {
+    if (categoryType && partialCat.type !== categoryType && partialCat.user_id === userId) {
+      await supabase.from('categories').update({ type: categoryType }).eq('id', partialCat.id);
+    }
     return partialCat.id;
   }
 
-  // 3. Insert new category for this user
+  // 3. Infer default type if not provided
+  let finalType: CategoryType = categoryType || 'operational';
+  if (!categoryType) {
+    const savingsRegex = /tabungan|investasi|savings|deposito|dana darurat|reksa dana|portfolio/i;
+    const fixedBillRegex = /internet|komunikasi|telepon|pulsa|paket data|wifi|indihome|biznet|indosat|telkomsel|xl|tri|smartfren|listrik|pln|air|pdam|sewa|kos|kost|kontrakan|kpr|cicilan|asuransi|bpjs|pajak|tagihan|utilitas|laundry|subskripsi|subscription|netflix|spotify|youtube/i;
+    if (savingsRegex.test(trimmed)) {
+      finalType = 'savings';
+    } else if (fixedBillRegex.test(trimmed)) {
+      finalType = 'fixed_bill';
+    }
+  }
+
+  // Insert new category for this user
   const { data: newCat, error: catError } = await supabase
     .from('categories')
     .insert({
       user_id: userId,
       name: trimmed,
+      type: finalType,
     })
     .select('id')
     .single();
@@ -131,12 +157,13 @@ export async function setCategoryBudget(params: {
   categoryName: string;
   limitAmount: number;
   period?: string;
+  categoryType?: CategoryType;
 }): Promise<Budget> {
   const supabase = getSupabaseClient();
   const targetPeriod = params.period || getWIBMonthPeriod();
 
   // 1. Find or create category scoped to this user
-  const categoryId = await getOrCreateCategoryByName(params.userId, params.categoryName);
+  const categoryId = await getOrCreateCategoryByName(params.userId, params.categoryName, params.categoryType);
 
   // 2. Upsert budget
   const { data: budget, error } = await supabase

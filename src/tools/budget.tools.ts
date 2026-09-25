@@ -5,17 +5,22 @@ import { getSmartDailyLimitStatus } from '../db/daily-limit.db.ts';
 export const budgetToolDeclarations = [
   {
     name: 'set_category_budget',
-    description: 'Set or update the monthly spending limit for a specific category.',
+    description: 'Set or update the monthly spending limit for a specific category with an optional category type.',
     parameters: {
       type: 'OBJECT',
       properties: {
         categoryName: {
           type: 'STRING',
-          description: 'Category name for the budget, e.g. "Transportasi", "Makanan & Minuman".',
+          description: 'Category name for the budget, e.g. "Transportasi", "Makanan & Minuman", "Kost".',
         },
         limitAmount: {
           type: 'NUMBER',
           description: 'Maximum budget limit in IDR (e.g. 500000).',
+        },
+        categoryType: {
+          type: 'STRING',
+          enum: ['operational', 'fixed_bill', 'savings'],
+          description: 'Type of category: "operational" (daily living expense included in daily limit), "fixed_bill" (monthly recurring bill excluded from daily limit), or "savings" (wealth building excluded from burn rate).',
         },
         period: {
           type: 'STRING',
@@ -69,10 +74,12 @@ export async function executeBudgetTool(toolName: string, args: Record<string, a
       categoryName: args.categoryName,
       limitAmount: Number(args.limitAmount),
       period: args.period,
+      categoryType: args.categoryType,
     });
+    const typeLabel = args.categoryType === 'fixed_bill' ? ' (Tagihan Rutin)' : args.categoryType === 'savings' ? ' (Tabungan)' : ' (Operasional Harian)';
     return {
       success: true,
-      message: `Budget untuk kategori ${args.categoryName} berhasil diatur sebesar Rp ${Number(budget.limit_amount).toLocaleString('id-ID')}/bulan.`,
+      message: `Budget untuk kategori ${args.categoryName}${typeLabel} berhasil diatur sebesar Rp ${Number(budget.limit_amount).toLocaleString('id-ID')}/bulan.`,
       data: budget,
     };
   }

@@ -22,10 +22,13 @@ export interface Transaction {
   created_at: string;
 }
 
+export type CategoryType = 'operational' | 'fixed_bill' | 'savings';
+
 export interface Category {
   id: string;
   user_id?: string;
   name: string;
+  type?: CategoryType;
   created_at: string;
 }
 
@@ -58,6 +61,9 @@ export interface SmartDailyLimitStatus {
   todayFixedBillsSpent?: number;
   todayTotalSpentWithBills?: number;
   fixedBillsCountToday?: number;
+  totalFixedBillsBudget?: number;
+  totalFixedBillsSpent?: number;
 }
+
 
 

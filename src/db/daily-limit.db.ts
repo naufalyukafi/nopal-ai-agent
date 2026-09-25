@@ -6,14 +6,18 @@ import type { SmartDailyLimitStatus } from '../types/index.ts';
 import { logger } from '../utils/logger.ts';
 import { getWIBStartOfDay } from '../utils/date.ts';
 
-export function isSavingsCategory(catName?: string): boolean {
+export function isSavingsCategory(catName?: string, catType?: string): boolean {
+  if (catType === 'savings') return true;
+  if (catType === 'operational' || catType === 'fixed_bill') return false;
   if (!catName) return false;
   return /tabungan|investasi|savings|deposito|dana darurat|reksa dana|portfolio/i.test(catName.trim());
 }
 
-export function isFixedBillCategory(catName?: string): boolean {
+export function isFixedBillCategory(catName?: string, catType?: string): boolean {
+  if (catType === 'fixed_bill') return true;
+  if (catType === 'operational' || catType === 'savings') return false;
   if (!catName) return false;
-  return /internet|komunikasi|telepon|pulsa|paket data|wifi|indihome|biznet|indosat|telkomsel|xl|tri|smartfren|listrik|pln|air|pdam|sewa|kos|kontrakan|kpr|cicilan|asuransi|bpjs|pajak|subskripsi|subscription|netflix|spotify|youtube/i.test(catName.trim());
+  return /internet|komunikasi|telepon|pulsa|paket data|wifi|indihome|biznet|indosat|telkomsel|xl|tri|smartfren|listrik|pln|air|pdam|sewa|kos|kost|kontrakan|kpr|cicilan|asuransi|bpjs|pajak|tagihan|utilitas|laundry|subskripsi|subscription|netflix|spotify|youtube/i.test(catName.trim());
 }
 
 export async function getSmartDailyLimitStatus(
@@ -26,12 +30,11 @@ export async function getSmartDailyLimitStatus(
   const cutoffDay = await getUserSalaryCutoffDay(userId);
   const cycle = calculateSalaryCycleDateRange(cutoffDay, referenceDate);
 
-  // 2. Fetch total active monthly budget for user (excluding Savings / Tabungan categories)
-  // Consistently uses canonical cycleMonthPeriod so the cycle's budget doesn't flip halfway through
+  // 2. Fetch total active monthly budget for user (selecting name and explicit type)
   const targetPeriod = cycle.cycleMonthPeriod;
   const { data: budgets, error: budgetError } = await supabase
     .from('budgets')
-    .select('limit_amount, category_id, categories(name)')
+    .select('limit_amount, category_id, categories(name, type)')
     .eq('user_id', userId)
     .eq('period', targetPeriod);
 
@@ -44,7 +47,7 @@ export async function getSmartDailyLimitStatus(
     // Fallback to latest configured budget per category
     const { data: latestBudgets } = await supabase
       .from('budgets')
-      .select('limit_amount, category_id, categories(name)')
+      .select('limit_amount, category_id, categories(name, type)')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -56,9 +59,9 @@ export async function getSmartDailyLimitStatus(
     });
   }
 
-  // Filter out Savings categories so daily limit only reflects operational living expenses
+  // Filter ONLY operational budgets for daily limit allowance
   const operationalBudgets = activeBudgets.filter(
-    (b: any) => !isSavingsCategory(b.categories?.name)
+    (b: any) => !isSavingsCategory(b.categories?.name, b.categories?.type) && !isFixedBillCategory(b.categories?.name, b.categories?.type)
   );
 
   const totalMonthlyBudgetCents = operationalBudgets.reduce(
@@ -67,10 +70,21 @@ export async function getSmartDailyLimitStatus(
   );
   const totalMonthlyBudget = Math.round(totalMonthlyBudgetCents) / 100;
 
+  // Filter fixed bill budgets for structured overview
+  const fixedBillBudgets = activeBudgets.filter(
+    (b: any) => isFixedBillCategory(b.categories?.name, b.categories?.type)
+  );
+
+  const totalFixedBillsBudgetCents = fixedBillBudgets.reduce(
+    (sum: number, b: any) => sum + Math.round(Number(b.limit_amount || 0) * 100),
+    0
+  );
+  const totalFixedBillsBudget = Math.round(totalFixedBillsBudgetCents) / 100;
+
   // 3. Fetch total confirmed transactions in current salary cycle
   const { data: cycleTxs, error: txError } = await supabase
     .from('transactions')
-    .select('amount, categories(name)')
+    .select('amount, categories(name, type)')
     .eq('user_id', userId)
     .eq('status', 'confirmed')
     .gte('transaction_date', cycle.startDate)
@@ -80,17 +94,29 @@ export async function getSmartDailyLimitStatus(
     logger.error('DB:DailyLimit', 'Error fetching cycle transactions for daily limit', txError, { userId, cycle });
   }
 
-  // Filter out confirmed transactions under Savings categories using cent math
-  const cycleSpentCents = (cycleTxs || []).reduce((sum: number, t: any) => {
-    if (isSavingsCategory(t.categories?.name)) return sum;
-    return sum + Math.round(Number(t.amount || 0) * 100);
-  }, 0);
-  const cycleSpent = Math.round(cycleSpentCents) / 100;
+  // Calculate operational spent vs fixed bill spent in current cycle
+  let cycleOperationalCents = 0;
+  let cycleFixedBillsCents = 0;
+
+  for (const t of cycleTxs || []) {
+    const amtCents = Math.round(Number(t.amount || 0) * 100);
+    const cat = (Array.isArray(t.categories) ? t.categories[0] : t.categories) as any;
+    if (isSavingsCategory(cat?.name, cat?.type)) {
+      continue;
+    }
+    if (isFixedBillCategory(cat?.name, cat?.type)) {
+      cycleFixedBillsCents += amtCents;
+    } else {
+      cycleOperationalCents += amtCents;
+    }
+  }
+
+  const cycleOperationalSpent = Math.round(cycleOperationalCents) / 100;
+  const cycleFixedBillsSpent = Math.round(cycleFixedBillsCents) / 100;
 
   // 4. Fetch today's confirmed spending summary using WIB boundaries
   const todaySummary = await getTodayTransactionsSummary(userId, referenceDate);
   
-  // Separate today's spending into operational vs fixed bills vs savings
   let todayOperationalCents = 0;
   let todayFixedBillsCents = 0;
   let fixedBillsCountToday = 0;
@@ -123,15 +149,13 @@ export async function getSmartDailyLimitStatus(
   const diffMs = cycleEnd.getTime() - todayStart.getTime();
   const remainingDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
-  // 6. Calculate realistic daily limit (Baseline vs Dynamic Pace)
-  const remainingMonthlyBudget = Math.max(0, totalMonthlyBudget - cycleSpent);
-  // Available budget for remainder excludes operational spent today so today's limit is dynamic
-  const availableBudgetForRemainder = Math.max(0, totalMonthlyBudget - (cycleSpent - todaySpent));
+  // 6. Calculate realistic daily limit (Baseline vs Dynamic Pace based on OPERATIONAL budget only)
+  const remainingMonthlyBudget = Math.max(0, totalMonthlyBudget - cycleOperationalSpent);
+  const availableBudgetForRemainder = Math.max(0, totalMonthlyBudget - (cycleOperationalSpent - todaySpent));
 
   const baselineDailyLimit = totalMonthlyBudget > 0 ? Math.floor(totalMonthlyBudget / totalDaysInCycle) : 0;
   const dynamicDailyLimit = totalMonthlyBudget > 0 ? Math.floor(availableBudgetForRemainder / remainingDays) : 0;
 
-  // Honest dynamic limit calculation: rewards early savings and reflects actual remaining runway
   const recommendedDailyLimit = dynamicDailyLimit;
   const todayRemainingLimit = recommendedDailyLimit - todaySpent;
 
@@ -178,6 +202,9 @@ export async function getSmartDailyLimitStatus(
     todayFixedBillsSpent,
     todayTotalSpentWithBills,
     fixedBillsCountToday,
+    totalFixedBillsBudget,
+    totalFixedBillsSpent: cycleFixedBillsSpent,
   };
 }
+
 
