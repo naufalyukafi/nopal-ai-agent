@@ -10,6 +10,14 @@ test('isLikelyFinancialEmail detects Indonesian bank & QRIS payment notification
   assert.equal(isLikelyFinancialEmail(subject, snippet, body), true, 'BCA QRIS payment must be detected as financial');
 });
 
+test('isLikelyFinancialEmail detects Bank Jago payment notifications', () => {
+  const subject = "Kamu telah membayar ke PT INDOSAT Tbk💸 - Jago Assalamu'alaikum NAUFAL YUKAFI RIDLO";
+  const snippet = "Terima kasih telah menggunakan Jago. Detail pembayaran sebesar Rp. 85.000 ke PT INDOSAT Tbk";
+  const body = "Assalamu'alaikum NAUFAL YUKAFI RIDLO, Kamu telah membayar ke PT INDOSAT Tbk sebesar Rp. 85.000. Syarat & ketentuan promo berlaku.";
+
+  assert.equal(isLikelyFinancialEmail(subject, snippet, body), true, 'Bank Jago payment to Indosat must be detected as financial');
+});
+
 test('isLikelyFinancialEmail detects merchant grocery and food orders', () => {
   const subject = 'Pesanan Online Alfagift O-260922-AGHHPZT Berhasil';
   const snippet = 'Terima kasih atas pesanan Anda di Alfagift dengan produk makanan dan minuman';

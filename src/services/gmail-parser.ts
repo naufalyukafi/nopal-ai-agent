@@ -43,15 +43,15 @@ export function isLikelyFinancialEmail(subject: string, snippet: string, bodyTex
 
   // 1. Skip obvious non-financial noise & promo marketing newsletters WITHOUT explicit receipt signals
   const isObviousNoise = /unsubscribe|newsletter|berlangganan|lowongan|job alert|security alert|login baru|kode otp|verifikasi akun|reset password|verification code|promo|cashback|diskon|voucher|penawaran|syarat & ketentuan|klaim/i.test(cleanSubject);
-  const hasStrongReceiptSignal = /berhasil|sukses|dibayar|pembayaran sebesar|total bayar|rincian transaksi|rincian pembayaran|kuitansi|struk|order #|pesanan #|bukti transfer|bukti pembayaran/i.test(combined);
+  const hasStrongReceiptSignal = /berhasil|sukses|dibayar|telah membayar|membayar ke|pembayaran|total bayar|rincian transaksi|rincian pembayaran|kuitansi|struk|order #|pesanan #|bukti transfer|bukti pembayaran|mentransfer|dikirim/i.test(combined);
 
   if (isObviousNoise && !hasStrongReceiptSignal) {
     return false;
   }
 
-  // 2. Must contain an actual currency amount (e.g. Rp 10.000 or IDR 50,000 or $15) or payment terms
-  const hasCurrencyPattern = /rp\s*[\d.,]{2,}|idr\s*[\d.,]{2,}|\$\s*[\d.]+|€\s*[\d.]+/i.test(combined);
-  const hasFinancialSignal = /pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|struk|order|pesanan|qris|transfer|billing|payment|purchase|paid|kuitansi|pembelian/i.test(combined);
+  // 2. Must contain an actual currency amount (e.g. Rp 10.000, Rp. 50.000, IDR 50,000, $15) or payment terms
+  const hasCurrencyPattern = /rp\.?\s*[\d.,]{2,}|idr\s*[\d.,]{2,}|\$\s*[\d.]+|€\s*[\d.]+/i.test(combined);
+  const hasFinancialSignal = /pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|struk|order|pesanan|qris|transfer|mentransfer|billing|payment|purchase|paid|kuitansi|pembelian|top\s*up|isi\s*ulang/i.test(combined);
 
   if (hasCurrencyPattern && (hasFinancialSignal || hasStrongReceiptSignal)) {
     return true;
