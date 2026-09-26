@@ -146,18 +146,31 @@ function extractBodyFromPayload(payload: any): string {
     return decodeBase64Url(payload.body.data);
   }
   if (payload.parts && Array.isArray(payload.parts)) {
-    for (const part of payload.parts) {
+    let plainText = '';
+    let htmlText = '';
+
+    function processPart(part: any) {
       if (part.mimeType === 'text/plain' && part.body?.data) {
-        return decodeBase64Url(part.body.data);
-      }
-      if (part.mimeType === 'text/html' && part.body?.data) {
-        return decodeBase64Url(part.body.data);
-      }
-      if (part.parts) {
-        const sub = extractBodyFromPayload(part);
-        if (sub) return sub;
+        plainText += decodeBase64Url(part.body.data) + '\n';
+      } else if (part.mimeType === 'text/html' && part.body?.data) {
+        htmlText += decodeBase64Url(part.body.data) + '\n';
+      } else if (part.parts && Array.isArray(part.parts)) {
+        for (const subPart of part.parts) {
+          processPart(subPart);
+        }
       }
     }
+
+    for (const part of payload.parts) {
+      processPart(part);
+    }
+
+    // Modern transaction emails (Bank Jago, BCA, Alfagift, etc.) put detailed receipt tables in HTML.
+    // HTML text is converted to clean line-separated text by stripHtmlToPlainText.
+    if (htmlText.trim().length > 0) {
+      return htmlText.trim();
+    }
+    return plainText.trim();
   }
   return '';
 }
@@ -207,29 +220,39 @@ export async function syncGmailMessagesForUser(
     try {
       const accessToken = await getAccessTokenFromRefreshToken(account.refresh_token);
 
-      // Delta sync cursor: query by timestamp window directly so no bank/app email is missed at Gmail API search level
+      // Delta sync cursor: query by timestamp window
       let queryParam = 'newer_than:7d';
       if (account.last_synced_message_timestamp) {
         const lastSyncTime = new Date(account.last_synced_message_timestamp).getTime();
-        // Add 5-minute safety buffer for clock skew
-        const afterUnix = Math.max(0, Math.floor((lastSyncTime - 5 * 60 * 1000) / 1000));
+        // 2-hour safety overlap buffer to handle Gmail API indexing delay & clock skew
+        const afterUnix = Math.max(0, Math.floor((lastSyncTime - 2 * 60 * 60 * 1000) / 1000));
         queryParam = `after:${afterUnix}`;
       }
 
-      // Search messages using timestamp cursor (limit to 25 to cover busy inbox batches)
-      const listRes = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(queryParam)}&maxResults=25`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
+      // Search messages using timestamp cursor with pagination support (maxResults=50 per page)
+      let pageToken: string | undefined = undefined;
+      const messages: Array<{ id: string }> = [];
 
-      if (!listRes.ok) {
-        const errText = await listRes.text();
-        errors.push(`${account.email}: Gagal mengambil daftar email (Status ${listRes.status})`);
-        continue;
-      }
+      do {
+        let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(queryParam)}&maxResults=50`;
+        if (pageToken) {
+          url += `&pageToken=${encodeURIComponent(pageToken)}`;
+        }
 
-      const listData = await listRes.json();
-      const messages: Array<{ id: string }> = listData.messages || [];
+        const listRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!listRes.ok) {
+          const errText = await listRes.text();
+          errors.push(`${account.email}: Gagal mengambil daftar email (Status ${listRes.status})`);
+          break;
+        }
+
+        const listData = await listRes.json();
+        const pageMsgs: Array<{ id: string }> = listData.messages || [];
+        messages.push(...pageMsgs);
+
+        pageToken = listData.nextPageToken;
+        if (messages.length >= 100) break; // Limit to 100 per sync run per account
+      } while (pageToken);
 
       for (const msgRef of messages) {
         // Check if message already ingested in transactions table
@@ -253,7 +276,9 @@ export async function syncGmailMessagesForUser(
         const headers: Array<{ name: string; value: string }> = msgData.payload?.headers || [];
 
         const subjectHeader = headers.find((h) => h.name.toLowerCase() === 'subject');
+        const fromHeader = headers.find((h) => h.name.toLowerCase() === 'from');
         const subject = subjectHeader ? subjectHeader.value : '';
+        const sender = fromHeader ? fromHeader.value : '';
         const snippet = msgData.snippet || '';
         const bodyText = extractBodyFromPayload(msgData.payload) || snippet;
 
@@ -267,8 +292,8 @@ export async function syncGmailMessagesForUser(
         // Rate limit safety throttle: pause 1.5s between Gemini parsing calls to guarantee < 15 RPM
         await new Promise((resolve) => setTimeout(resolve, 1500));
 
-        // Parse email using Gemini Structured JSON Output with user active categories
-        const parsed = await parseEmailContentWithGemini(subject, snippet, bodyText, activeCategories);
+        // Parse email using Gemini Structured JSON Output with user active categories & sender context
+        const parsed = await parseEmailContentWithGemini(subject, snippet, bodyText, activeCategories, sender);
 
         // Extract accurate transaction date from Gmail message internalDate (epoch ms) or Date header
         let emailTxDate: string | undefined = undefined;

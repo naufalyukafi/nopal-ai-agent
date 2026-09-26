@@ -23,20 +23,28 @@ export function stripHtmlToPlainText(html: string): string {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
+    // Preserve table and paragraph structure by converting block elements & breaks to newlines
+    .replace(/<\/(tr|div|p|h[1-6]|li|blockquote)>/gi, '\n')
+    .replace(/<(br|hr)\s*\/?>/gi, '\n')
+    .replace(/<\/(td|th)>/gi, '  ')
+    .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**
  * Smart, multi-stage pre-filter designed for high-scale cost efficiency.
  * 
  * Scalability Strategy:
- * 1. ALWAYS strip HTML tags first so CSS/style boilerplate never masks text content.
+ * 1. ALWAYS strip HTML tags first preserving line breaks so CSS/style boilerplate never masks text content.
  * 2. Filter out obvious 0-context noise (login OTPs, newsletter subscriptions, job digests)
  *    ONLY IF they contain zero currency numbers or receipt payment signals.
  * 3. Pass all potential transactions (banks, e-wallets, stores, invoices) directly to Gemini AI.
@@ -46,33 +54,34 @@ export function stripHtmlToPlainText(html: string): string {
 export function isLikelyFinancialEmail(subject: string, snippet: string, bodyText: string): boolean {
   const cleanSubj = (subject || '').toLowerCase();
   const cleanSnip = (snippet || '').toLowerCase();
-  const cleanBody = stripHtmlToPlainText(bodyText || '').slice(0, 2000).toLowerCase();
-  const combined = `${cleanSubj} ${cleanSnip} ${cleanBody}`;
+  const cleanBody = stripHtmlToPlainText(bodyText || '').slice(0, 4000).toLowerCase();
+  const combined = `${cleanSubj}\n${cleanSnip}\n${cleanBody}`;
 
   if (!combined.trim()) return false;
 
-  // 1. Detect clear non-financial noise (job digests, security login alerts, newsletters)
-  const isPureNoise = /job alert|lowongan kerja|peringatan pekerjaan|jobstreet|newsletter|security alert|login baru|kode otp|verifikasi akun|reset password|verification code|daily digest/i.test(cleanSubj);
+  // 1. Detect clear non-financial noise (job digests, security login alerts, newsletters, blog digests)
+  const isPureNoise = /job alert|lowongan kerja|peringatan pekerjaan|jobstreet|newsletter|security alert|login baru|kode otp|verifikasi akun|reset password|verification code|daily digest|weekly digest|medium daily/i.test(cleanSubj);
   
   // 2. Strong receipt / financial signals that override noise tags (e.g. if newsletter mentions an actual payment receipt)
-  const hasReceiptSignal = /pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|struk|order|pesanan|qris|transfer|mentransfer|billing|payment|purchase|paid|kuitansi|pembelian|top\s*up|isi\s*ulang|berhasil|sukses|kuitansi|struk|bukti/i.test(combined);
+  const hasReceiptSignal = /pembayaran|membayar|bayar|dibayar|transaksi|receipt|invoice|struk|order|pesanan|qris|transfer|mentransfer|billing|payment|purchase|paid|kuitansi|pembelian|top\s*up|isi\s*ulang|berhasil|sukses|bukti|ringkasan\s*transaksi|nominal|terkonfirmasi|dibayar\s*ke|jumlah/i.test(combined);
   const hasCurrencySignal = /rp\.?\s*\d|idr\s*\d|\$\s*\d|€\s*\d/i.test(combined);
-  const hasBankOrMerchant = /bca|mandiri|bni|bri|cimb|danamon|permata|jago|jenius|blu|seabank|ocbc|dbs|gopay|ovo|dana|shopeepay|shopee|tokopedia|grab|gojek|alfagift|indomaret|alfamart|superindo|paypal|stripe|apple|google play|steam/i.test(combined);
+  const hasBankOrMerchant = /bca|mandiri|bni|bri|cimb|danamon|permata|jago|jenius|blu|seabank|ocbc|dbs|gopay|ovo|dana|shopeepay|shopee|tokopedia|grab|gojek|alfagift|indomaret|alfamart|superindo|paypal|stripe|apple|google play|steam|geprekin/i.test(combined);
 
   // If it's pure non-financial noise and contains NO payment/currency/bank signal -> Filter out (save LLM token cost)
   if (isPureNoise && !hasReceiptSignal && !hasCurrencySignal) {
     return false;
   }
 
-  // Pass to Gemini if it contains any receipt signal, currency pattern, bank entity, or generic non-noise email
-  return hasReceiptSignal || hasCurrencySignal || hasBankOrMerchant || !isPureNoise;
+  // Pass to Gemini ONLY IF it contains a financial receipt signal, currency pattern, or bank/merchant entity
+  return hasReceiptSignal || hasCurrencySignal || hasBankOrMerchant;
 }
 
 export async function parseEmailContentWithGemini(
   subject: string,
   snippet: string,
   body: string,
-  userActiveCategories?: string[]
+  userActiveCategories?: string[],
+  sender?: string
 ): Promise<ExtractedEmailReceipt> {
   const keys = getApiKeys();
   const modelName = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
@@ -88,23 +97,28 @@ export async function parseEmailContentWithGemini(
     ? `User configured active budget categories:\n${userActiveCategories.map((c) => `- "${c}"`).join('\n')}\nStandard fallback categories: "Makanan & Minuman", "Transportasi", "Belanja", "Tagihan & Utilitas", "Hiburan & Rekreasi", "Kesehatan", "Pendidikan", "Lain-lain". ALWAYS prioritize matching the expense to a user configured active budget category if it logically fits.`
     : `Exact allowed categories: "Makanan & Minuman", "Transportasi", "Belanja", "Tagihan & Utilitas", "Hiburan & Rekreasi", "Kesehatan", "Pendidikan", or "Lain-lain".`;
 
-  const prompt = `
-Analyze the email text below and extract transaction receipt details:
+  const senderInfo = sender ? `Email Sender (From): "${sender}"\n` : '';
 
-Email Subject: "${subject}"
+  const prompt = `
+Analyze the email text below and extract completed transaction receipt details:
+
+${senderInfo}Email Subject: "${subject}"
 Email Snippet: "${snippet}"
 Email Content:
 """
-${cleanBody.slice(0, 3000)}
+${cleanBody.slice(0, 4500)}
 """
 
 EXTRACTION RULES:
-1. "isReceipt": Set to true ONLY if this email explicitly confirms an ALREADY COMPLETED OUTGOING EXPENSE / PAYMENT / PURCHASE / OUTGOING TRANSFER (uang keluar/pengeluaran/pembayaran/pembelian yang SUDAH SELESAI dilakukan). Set to false if this is a PROMOTION, MARKETING EMAIL, ADVERTISEMENT, DISCOUNT OFFER, PROMOTIONAL PASS, SPECIAL DEAL (penawaran promo, diskon, iklan, penawaran voucher/pass seperti "95% off", "$1 pass is ready", "promo token"), INCOMING TRANSACTION, INCOME, MUTUAL FUND REDEMPTION, deposit, refund, or non-expense notification.
-2. "amount": Parse the actual numeric transaction amount paid (e.g., 20.00 for $20 USD, 15000 for Rp 15.000). DO NOT use subject emoji numbers (like "1💸" or "1").
+1. "isReceipt": Set to true ONLY if this email explicitly confirms an ALREADY COMPLETED OUTGOING EXPENSE / PAYMENT / PURCHASE / OUTGOING TRANSFER (uang keluar/pengeluaran/pembayaran/pembelian/transfer keluar yang SUDAH SELESAI dilakukan). Set to false if this is a PENDING PAYMENT, UNPAID INVOICE, CANCELLED ORDER, PROMOTION, MARKETING EMAIL, ADVERTISEMENT, DISCOUNT OFFER, PROMOTIONAL PASS, INCOMING TRANSACTION, INCOME, MUTUAL FUND REDEMPTION, deposit, refund, or non-expense notification.
+2. "amount": Parse the FINAL NET TRANSACTION AMOUNT ACTUALLY PAID / CHARGED / TRANSFERRED as a pure positive number (e.g., 41400 for Rp 41.400, 28000 for Rp 28.000, 20.00 for $20 USD).
+   - CRITICAL AMOUNT RULE: If the invoice or receipt lists Subtotal, Item Prices, Original Prices, Discounts, Vouchers, Delivery Fee, and "Total Pembayaran" / "Total Bayar" / "Jumlah Transfer" / "Grand Total" / "Net Paid", ALWAYS extract the FINAL NET AMOUNT ACTUALLY PAID ("Total Pembayaran" / "Total Bayar"), NOT the subtotal before discount or original item prices!
+   - INDONESIAN CURRENCY FORMAT: "Rp 41.400" or "Rp 41.400,00" MUST be parsed as 41400 (NOT 41.4).
+   - DO NOT use subject emoji numbers, serial numbers, or raw transaction IDs.
 3. "currency": Extracted currency ISO code: "IDR", "USD", or "EUR". Defaults to "IDR".
-4. "merchantName": Extract the clean payee / merchant / recipient name (e.g. "Alfagift", "Resto Geprekin", "OpenAI / ChatGPT", "GitHub"). DO NOT include raw transaction IDs, serial numbers, terminal IDs, PAN numbers, or long series of zeroes.
+4. "merchantName": Extract clean payee / merchant / recipient name (e.g. "Alfagift", "Resto Geprekin", "OpenAI", "Grab", "Bank Jago"). DO NOT include raw transaction IDs, bank account numbers, serial numbers, terminal IDs, or long numbers.
 5. "categoryName": Categorize into an appropriate category. ${catPromptList} Note: Merchants like "Alfagift", "Indomaret", "Alfamart", "Superindo", "Hypermart" MUST be categorized as "Belanja" or "Makanan & Minuman" (NOT "Lain-lain").
-6. "description": A short clean summary (e.g., "Alfagift", "Resto Geprekin"). NEVER include reference numbers, long series of zeroes, or raw system tokens.
+6. "description": A concise, clean summary of what was paid or bought (e.g., "Alfagift - Aqua Air Mineral & Lainnya", "Resto Geprekin Jl Pemuda"). Exclude tracking numbers, internal account numbers, or sender/receiver boilerplate like "No Pengirim...".
 `;
 
   let lastError: any;
@@ -112,19 +126,20 @@ EXTRACTION RULES:
   // Key rotation and fallback loop across configured API keys
   for (const apiKey of keys) {
     try {
-      logger.info('GmailParser', `Parsing email using Gemini (${modelName})`, { subject });
+      logger.info('GmailParser', `Parsing email using Gemini (${modelName})`, { subject, sender });
       const ai = new GoogleGenAI({ apiKey });
 
       const response = await ai.models.generateContent({
         model: modelName,
         contents: prompt,
         config: {
+          systemInstruction: 'You are an expert financial transaction extraction system for personal expense tracking.',
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
             properties: {
               isReceipt: { type: Type.BOOLEAN, description: 'True if email is a successful expense receipt' },
-              amount: { type: Type.NUMBER, description: 'Parsed amount' },
+              amount: { type: Type.NUMBER, description: 'Parsed net amount paid' },
               currency: { type: Type.STRING, description: 'Currency code: IDR, USD, EUR' },
               merchantName: { type: Type.STRING, description: 'Payee or merchant name' },
               categoryName: { type: Type.STRING, description: 'Category name' },
